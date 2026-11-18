@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      App theme (FORENSIC FIX ROUND, 15 Nov). Until now the app ran on
+      the raw framework theme (@android:style/Theme.Material.NoActionBar)
+      with NO window flags at all, so the light status-bar appearance
+      depended solely on a one-shot WindowInsetsController call in
+      MainActivity.onCreate — nothing restored it if it was dropped or
+      reset, and on the user's phone the clock/icons rendered white and
+      vanished against the light background.
+
+      These attributes are applied by the framework before the first
+      frame and cannot be lost at runtime:
+      - windowLightStatusBar / windowLightNavigationBar: the app
+        background is ALWAYS light (#FAF7F4 / white), so both system
+        bars must draw DARK icons/text.
+      - statusBarColor / navigationBarColor transparent: the Compose
+        root paints the app background behind both bars (edge-to-edge),
+        the bars themselves carry no colour of their own.
+      MainActivity additionally calls enableEdgeToEdge() with light
+      SystemBarStyles (its insets listener reapplies the appearance on
+      every insets dispatch) and keeps the explicit controller flag —
+      three independent layers for the same outcome.
+    -->
+    <style name="Theme.RescueMesh" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

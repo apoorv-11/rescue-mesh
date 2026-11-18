@@ -1,0 +1,70 @@
+# Versions verified on 2026-11-14 against official sources (see README.md "Versions"):
+# - AGP 9.5.1: latest stable in Google Maven metadata; AGP 9.5 release notes require
+#   Gradle >= 9.6.0, JDK 17, max API 37.
+# - Kotlin 2.4.21: latest stable on kotlinlang.org (2.5.x is pre-release, excluded).
+# - KSP 2.3.14: latest stable on Maven Central (KSP now uses independent versioning).
+# - Compose BOM 2026.09.00, Room 2.8.5, core-ktx 1.19.1, activity-compose 1.13.0,
+#   lifecycle 2.11.0: latest stable in Google Maven metadata (alphas/RCs excluded).
+# - play-services-nearby 19.5.1: latest stable in Google Maven metadata.
+# - kotlinx-coroutines 1.11.0, JUnit 4.13.2: latest stable on Maven Central.
+# - tink-android 1.24.0: latest stable on Maven Central metadata (Prompt 4,
+#   Ed25519 identity; published as a jar, protobuf runtime is shaded inside).
+# - Retrofit 3.0.0 + converter-kotlinx-serialization 3.0.0: latest stable on
+#   Maven Central metadata (account layer). Retrofit's POM pins its OkHttp
+#   (4.12.0), which is therefore NOT re-pinned here. kotlinx-serialization
+#   1.13.0: latest stable on Maven Central metadata; the serialization
+#   compiler plugin is versioned with Kotlin itself (2.4.21).
+[versions]
+agp = "9.5.1"
+kotlin = "2.4.21"
+ksp = "2.3.14"
+composeBom = "2026.09.00"
+room = "2.8.5"
+coreKtx = "1.19.1"
+activityCompose = "1.13.0"
+lifecycle = "2.11.0"
+coroutines = "1.11.0"
+nearby = "19.5.1"
+tink = "1.24.0"
+retrofit = "3.0.0"
+kotlinxSerialization = "1.13.0"
+junit = "4.13.2"
+androidxTestExtJunit = "1.3.0"
+espresso = "3.7.0"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+# Material icons (user-authorised 15 Nov, replica round): NO version here —
+# the Compose BOM above manages it (BOM 2026.09.00 pins
+# material-icons-extended 1.7.8, verified in the BOM POM on Google Maven).
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+play-services-nearby = { group = "com.google.android.gms", name = "play-services-nearby", version.ref = "nearby" }
+tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tink" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+retrofit-converter-kotlinx-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
+androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

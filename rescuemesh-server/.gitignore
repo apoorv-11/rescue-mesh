@@ -1,0 +1,9 @@
+env
+.env.*
+!.env.example
+
+target/
+photos/
+*.log
+.idea/
+*.iml

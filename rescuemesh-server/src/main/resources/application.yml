@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: rescuemesh-server
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/rescuemesh}
+    username: ${DB_USERNAME:rescuemesh}
+    password: ${DB_PASSWORD:rescuemesh}
+  jpa:
+    # Flyway owns the schema (db/migration); Hibernate only validates against it.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+server:
+  port: ${PORT:8080}
+
+rescuemesh:
+  jwt:
+    # HS256 signing secret. The default below is for LOCAL DEVELOPMENT ONLY —
+    # set JWT_SECRET (>= 32 characters) in every real deployment.
+    secret: ${JWT_SECRET:local-dev-only-secret-change-me-0123456789abcdef}
+    expiration-hours: ${JWT_EXPIRATION_HOURS:24}
+  seed:
+    # Seeded on first boot if no such user exists (DataSeeder). Local dev defaults —
+    # override ADMIN_USERNAME / ADMIN_PASSWORD outside your laptop.
+    admin-username: ${ADMIN_USERNAME:admin}
+    admin-password: ${ADMIN_PASSWORD:admin123}
+  mail:
+    # Auth v2 mail (verification + role access codes) via the Resend HTTPS
+    # API. Optional: when RESEND_API_KEY is unset/blank, MailConfig falls
+    # back to LogMailService (dev mode — codes are written to the server
+    # log, no real email is sent).
+    resend-api-key: ${RESEND_API_KEY:}
+    # Sender address (RESEND_FROM). The default is Resend's sandbox sender,
+    # which can only deliver to the Resend account owner's own address —
+    # verify a domain in Resend to email other users (see README).
+    from: ${RESEND_FROM:RescueMesh <onboarding@resend.dev>}
+  sync:
+    # Sync ack signing key (Prompt 7): standard Base64 of a PKCS#8 DER
+    # Ed25519 private key (env SYNC_SIGNING_KEY). Unset/blank -> an ephemeral
+    # keypair is generated at startup with a WARN log (dev mode only: acks
+    # will not verify across restarts). See README for how to generate one.
+    signing-key: ${SYNC_SIGNING_KEY:}
+  photos:
+    # Gateway photo storage (photo transfer design §3): POST /sync/photo
+    # stores SHA-256-verified JPEGs here as <messageId>.jpg, served by
+    # GET /records/photos/{messageId}. Env PHOTO_DIR overrides; in Docker
+    # it points at a named volume (see docker-compose.yml).
+    dir: ${PHOTO_DIR:./photos}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

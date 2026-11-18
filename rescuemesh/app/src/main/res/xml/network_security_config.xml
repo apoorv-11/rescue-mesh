@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TESTING-BUILD CHOICE — tighten before any public release.
+
+  Cleartext HTTP is permitted app-wide so testers can point the optional
+  account layer at a LAN Docker server (http://192.168.x.x:8081) that has no
+  TLS certificate. The mesh, SOS and every offline flow never use the
+  network; only the account layer's HTTP client is affected by this. Before
+  a public release: remove cleartext (or scope it per-domain) and use the
+  HTTPS deployment URL (Render).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

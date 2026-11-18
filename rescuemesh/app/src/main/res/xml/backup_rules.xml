@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Legacy (API 26-30) full-backup rules; same intent as
+  data_extraction_rules.xml: exclude the Prompt 4 identity keyset
+  SharedPreferences file from backup. See that file for the reasoning.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="rescuemesh_identity_keyset.xml" />
+    <!-- Account layer: the JWT keyset is device-bound for the same reason. -->
+    <exclude domain="sharedpref" path="rescuemesh_token_keyset.xml" />
+</full-backup-content>

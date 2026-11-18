@@ -1,0 +1,39 @@
+
+# ---- Secrets / machine-only files ----
+.env
+.env.*
+!.env.example
+local.properties
+
+# ---- Android / Gradle (rescuemesh) ----
+.gradle/
+build/
+.idea/
+*.iml
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+
+# ---- Java / Maven (rescuemesh-server) ----
+target/
+photos/
+
+# ---- Node / Vite (rescuemesh-dashboard) ----
+node_modules/
+dist/
+dist-ssr/
+
+# ---- Python (rescuemesh-ml) ----
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ---- Logs / OS junk ----
+*.log
+.DS_Store
+Thumbs.db
+
+/*.zip

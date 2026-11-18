@@ -1,0 +1,21 @@
+# Test profile: H2 in-memory instead of PostgreSQL, schema created by Hibernate.
+# PostgreSQL remains the runtime database; Flyway migrations are PostgreSQL
+# dialect and are exercised by the Docker deployment, not by these tests.
+spring:
+  datasource:
+    url: jdbc:h2:mem:rescuemesh-test;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  flyway:
+    enabled: false
+
+rescuemesh:
+  jwt:
+    secret: test-only-secret-test-only-secret-0123456789
+  seed:
+    admin-username: admin
+    admin-password: admin123

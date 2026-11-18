@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Prompt 4: the Ed25519 identity keyset (SharedPreferences file
+  "rescuemesh_identity_keyset", wrapped under an Android Keystore KEK) must
+  never leave this device. Keystore keys cannot be restored on another
+  device, so a backed-up/transferred keyset would be undecryptable garbage —
+  and an identity must not be clonable by backup anyway. Everything else in
+  the app keeps normal backup behaviour (manifest allowBackup="true").
+  API 31+ uses this file; API 26-30 uses backup_rules.xml.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="rescuemesh_identity_keyset.xml" />
+        <!-- Account layer: the JWT keyset is device-bound for the same reason. -->
+        <exclude domain="sharedpref" path="rescuemesh_token_keyset.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="rescuemesh_identity_keyset.xml" />
+        <exclude domain="sharedpref" path="rescuemesh_token_keyset.xml" />
+    </device-transfer>
+</data-extraction-rules>

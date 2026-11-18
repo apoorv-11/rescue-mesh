@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Nearby Connections permissions, per the official Nearby "Get started" page.
+         Sets are gated by maxSdkVersion / minSdkVersion so each Android version
+         only sees the permissions it actually needs. -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <!-- ACCESS_WIFI_STATE must NOT be SDK-gated: Nearby checks it on every API
+         level and returns 8032 MISSING_PERMISSION_ACCESS_WIFI_STATE without it.
+         It is a normal (install-time) permission, so no runtime prompt exists
+         for it. The maxSdkVersion="31" gating here caused error 8032 on the
+         team's Android 13+ phones during Gate 1b (14 Nov 2026). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:minSdkVersion="29"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"
+        android:minSdkVersion="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"
+        android:minSdkVersion="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:minSdkVersion="31"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="33" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:minSdkVersion="33"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- Account layer only (optional server testing): SOS, I Am Safe and the
+         mesh never use the network and never request this permission's use. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Gateway sync (Prompt 9): lets the app register a default-network
+         callback so a network coming back triggers a sync attempt. Normal
+         (install-time) permission; the callback only observes connectivity. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Relay foreground service (Prompt 5): keeps the relay engine running
+         with a persistent notification. CONNECTED_DEVICE matches the
+         service's foregroundServiceType (it exists to talk to nearby phones). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".RescueMeshApp"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RescueMesh"
+        tools:targetApi="36">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.RescueMesh">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".RelayService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+    </application>
+</manifest>

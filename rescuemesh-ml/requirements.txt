@@ -1,0 +1,19 @@
+# RescueMesh ML service — direct dependencies, exact installed versions.
+# Verified at build time (18 Nov 2026) on Python 3.12.3.
+# fastapi and scikit-learn are pinned exactly per the Prompt 8 starter
+# sheet (FastAPI is still 0.x — never float it).
+fastapi==0.163.1
+scikit-learn==1.9.1
+uvicorn==0.54.0
+pydantic==2.14.3
+joblib==1.6.0
+pytest==9.2.0
+httpx==0.28.1
+# Face-match extension (18 Nov 2026): insightface buffalo_s on CPU.
+# First run downloads the buffalo_s model pack (~120 MB) from the
+# insightface GitHub model zoo into ~/.insightface/models/.
+insightface==2.1
+onnxruntime==1.32.0
+python-multipart==0.0.34
+opencv-python==5.1.0.95
+pillow==13.0.0
