@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
-import "leaflet.heat";
 import {
   API_BASE,
   ApiError,
@@ -1692,23 +1691,107 @@ function FitPins({ pins }: { pins: Pin[] }) {
   return null;
 }
 
-/* leaflet.heat layer (L.heatLayer, added by the plugin import).
- * Rebuilt whenever the point set changes; removed on cleanup. */
+/* Heat layer drawn on a plain canvas in the overlay pane — no
+ * external plugin. (The leaflet.heat plugin was tried first and
+ * crashed the whole app at runtime — "L.heatLayer is not a function"
+ * from its module interop — so the heat rendering lives here now.)
+ * Classic two-pass algorithm: soft radial blobs accumulate alpha on
+ * a grayscale canvas, then alphas map through a colour palette.
+ * Everything is guarded: a heat failure must never take the
+ * dashboard down. */
+let heatPalette: Uint8ClampedArray | null = null;
+function getHeatPalette(): Uint8ClampedArray {
+  if (heatPalette) return heatPalette;
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 1;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createLinearGradient(0, 0, 256, 0);
+  g.addColorStop(0.0, "rgba(0, 0, 255, 0)");
+  g.addColorStop(0.35, "rgba(0, 0, 255, 0.5)");
+  g.addColorStop(0.55, "rgba(0, 255, 255, 0.6)");
+  g.addColorStop(0.7, "rgba(0, 255, 0, 0.65)");
+  g.addColorStop(0.85, "rgba(255, 255, 0, 0.75)");
+  g.addColorStop(1.0, "rgba(255, 0, 0, 0.9)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 1);
+  heatPalette = ctx.getImageData(0, 0, 256, 1).data;
+  return heatPalette;
+}
+
+function drawHeat(
+  canvas: HTMLCanvasElement,
+  map: L.Map,
+  points: [number, number, number][],
+) {
+  const size = map.getSize();
+  const w = size.x;
+  const h = size.y;
+  const gray = document.createElement("canvas");
+  gray.width = w;
+  gray.height = h;
+  const g = gray.getContext("2d")!;
+  const radius = 26;
+  for (const [lat, lng, intensity] of points) {
+    const pt = map.latLngToContainerPoint([lat, lng]);
+    if (pt.x < -radius || pt.y < -radius || pt.x > w + radius || pt.y > h + radius) {
+      continue;
+    }
+    const grad = g.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, radius);
+    const a = Math.min(0.55 * intensity, 0.9);
+    grad.addColorStop(0, `rgba(0, 0, 0, ${a})`);
+    grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
+    g.fill();
+  }
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, w, h);
+  const img = g.getImageData(0, 0, w, h);
+  const data = img.data;
+  const pal = getHeatPalette();
+  for (let i = 0; i < data.length; i += 4) {
+    const alpha = data[i + 3];
+    if (alpha === 0) continue;
+    const j = alpha * 4;
+    data[i] = pal[j];
+    data[i + 1] = pal[j + 1];
+    data[i + 2] = pal[j + 2];
+    data[i + 3] = Math.min(255, alpha * 1.6);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 function HeatLayer({ points }: { points: [number, number, number][] }) {
   const map = useMap();
   useEffect(() => {
     if (points.length === 0) return;
-    const heat = (
-      L as unknown as {
-        heatLayer: (
-          pts: [number, number, number][],
-          opts?: Record<string, unknown>,
-        ) => L.Layer;
+    let canvas: HTMLCanvasElement | null = null;
+    const redraw = () => {
+      try {
+        if (!canvas) return;
+        const size = map.getSize();
+        canvas.width = size.x;
+        canvas.height = size.y;
+        L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
+        drawHeat(canvas, map, points);
+      } catch {
+        /* decorative layer — a draw failure changes nothing else */
       }
-    ).heatLayer(points, { radius: 28, blur: 18, minOpacity: 0.35 });
-    heat.addTo(map);
+    };
+    try {
+      canvas = L.DomUtil.create("canvas", "rm-heat") as HTMLCanvasElement;
+      canvas.style.pointerEvents = "none";
+      map.getPanes().overlayPane.appendChild(canvas);
+      map.on("moveend zoomend resize", redraw);
+      redraw();
+    } catch {
+      /* no heat layer — the rest of the map is unaffected */
+    }
     return () => {
-      map.removeLayer(heat);
+      map.off("moveend zoomend resize", redraw);
+      canvas?.remove();
     };
   }, [map, points]);
   return null;
