@@ -51,8 +51,8 @@ class FormsPayloadTest {
         )
         assertEquals(
             """{"category":"MEDICAL","description":"Trapped under debris","peopleCount":3,"injured":1,""" +
-                """"needs":["WATER","MEDICINE"],"vulnerable":["CHILD"],""" +
-                """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+                    """"needs":["WATER","MEDICINE"],"vulnerable":["CHILD"],""" +
+                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
             sos.payload
         )
         assertEquals(1, sos.priority)
@@ -93,8 +93,8 @@ class FormsPayloadTest {
         )
         assertEquals(
             """{"caseId":"${missing.messageId}","name":"Asha","age":9,""" +
-                """"description":"Red jacket, short hair","lastSeenArea":"MG Road",""" +
-                """"lastSeenAt":1699990000000,"photoThumb":"aBc123_-"}""",
+                    """"description":"Red jacket, short hair","lastSeenArea":"MG Road",""" +
+                    """"lastSeenAt":1699990000000,"photoThumb":"aBc123_-"}""",
             missing.payload
         )
         assertFalse(missing.payload.contains("photoOmitted"))
@@ -114,7 +114,7 @@ class FormsPayloadTest {
         )
         assertEquals(
             """{"caseId":"${missing.messageId}","description":"Unknown","lastSeenArea":"Station",""" +
-                """"lastSeenAt":1699990000000,"photoOmitted":true}""",
+                    """"lastSeenAt":1699990000000,"photoOmitted":true}""",
             missing.payload
         )
     }
@@ -124,7 +124,7 @@ class FormsPayloadTest {
         val found = factory.createPersonFound("device-a", "case-42", "Found at the shelter", gps)
         assertEquals(
             """{"caseId":"case-42","note":"Found at the shelter",""" +
-                """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
             found.payload
         )
         assertEquals(2, found.priority)
@@ -132,6 +132,26 @@ class FormsPayloadTest {
 
         val noLocation = factory.createPersonFound("device-a", "case-42", "Safe")
         assertEquals("""{"caseId":"case-42","note":"Safe"}""", noLocation.payload)
+    }
+
+    @Test
+    fun `person found - foundArea rides as its own key, blank is omitted`() {
+        // FIX7: the place name is a structured key (the mirror of a
+        // Missing report's lastSeenArea), never buried inside `note` —
+        // that is what the dashboard reads for the found report's AREA.
+        val withArea = factory.createPersonFound(
+            "device-a", "case-42", "Safe", gps, foundArea = "NCU, Sector 23A, Gurugram"
+        )
+        assertEquals(
+            """{"caseId":"case-42","note":"Safe","foundArea":"NCU, Sector 23A, Gurugram",""" +
+                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+            withArea.payload
+        )
+
+        val blankArea = factory.createPersonFound(
+            "device-a", "case-42", "Safe", foundArea = "   "
+        )
+        assertEquals("""{"caseId":"case-42","note":"Safe"}""", blankArea.payload)
     }
 
     @Test
@@ -156,7 +176,7 @@ class FormsPayloadTest {
         val withNote = factory.createResourceUpdate("device-a", "BEDS", 5, note = "Community hall", location = gps)
         assertEquals(
             """{"resourceType":"BEDS","quantity":5,"note":"Community hall",""" +
-                """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
             withNote.payload
         )
     }

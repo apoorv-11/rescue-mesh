@@ -689,6 +689,15 @@ class RelayEngine(
         val record = messageDao.getById(packet.messageId) ?: return
         val ref = PhotoRef.parse(record.payload) ?: return
         if (ref.photoId != packet.messageId) return
+        // FIX8 (19 Nov 2026): a photo already complete + verified on this
+        // phone takes no more packets. A stale retransmit after completion
+        // used to write orphan parts back into the parts dir (and a late
+        // END re-ran assembly with the parts dir already gone, so the peer
+        // answered MISSING for the full range and the sender resent every
+        // chunk — the 500 KB relay test's exact chunk count failed on it).
+        // Dropping the packet is correct: the complete file already stands
+        // and is what store-and-forward advertises.
+        if (store.hasComplete(packet.messageId)) return
         if (isExpiredForRelay(record, now())) return
         val expectedTotal = PacketCodec.photoChunkCount(ref.sizeBytes)
         if (packet.isEndMarker) {

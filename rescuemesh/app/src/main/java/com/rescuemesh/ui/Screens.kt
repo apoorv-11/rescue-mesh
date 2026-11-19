@@ -421,7 +421,7 @@ fun OnboardingScreen(viewModel: AppViewModel) {
                         withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold)) { append("CITIZEN") }
                         append(
                             ". Volunteer & Coordinator roles are granted later from the " +
-                                "Account tab, after admin review — there is no role picker here."
+                                    "Account tab, after admin review — there is no role picker here."
                         )
                     },
                     style = TextStyle(
@@ -810,7 +810,7 @@ fun HomeScreen(viewModel: AppViewModel, accountViewModel: AccountViewModel) {
                 viewModel,
                 message,
                 foundLinked = message.eventType == "MISSING_PERSON" &&
-                    message.messageId in foundLinkedIds
+                        message.messageId in foundLinkedIds
             ) { viewModel.selectTab(AppTab.RECORDS) }
         }
         if (messages.isEmpty()) {
@@ -876,8 +876,8 @@ private fun SosTargetMotif() {
 private fun MiniRecordCard(
     viewModel: AppViewModel,
     record: MessageEntity,
-    onClick: () -> Unit,
-    foundLinked: Boolean = false
+    foundLinked: Boolean = false,
+    onClick: () -> Unit
 ) {
     val photoState = rememberRecordPhotoState(viewModel, record)
     Box(
@@ -911,7 +911,7 @@ private fun MiniRecordCard(
                     )
                     Text(
                         "${recordTypeLabel(record.eventType)} · " +
-                            homeTimeFormat.format(Date(record.createdAt)),
+                                homeTimeFormat.format(Date(record.createdAt)),
                         style = TextStyle(
                             fontFamily = ManropeFamily,
                             fontWeight = FontWeight.SemiBold,
@@ -1350,7 +1350,7 @@ private fun ReceivedRow(text: String, expanded: Boolean, onToggle: () -> Unit) {
                 } else {
                     Text(
                         text.replace("\n", " ").take(90) +
-                            if (text.length > 90) "…" else "",
+                                if (text.length > 90) "…" else "",
                         style = TextStyle(
                             fontFamily = ManropeFamily,
                             fontWeight = FontWeight.SemiBold,
@@ -2086,7 +2086,7 @@ private fun SignUpPage(accountViewModel: AccountViewModel, onOpenLogin: () -> Un
             RmCard {
                 Text(
                     "New accounts are always CITIZEN. This phone's device ID is " +
-                        "sent automatically — there is nothing else to fill in.",
+                            "sent automatically — there is nothing else to fill in.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 RmTextField(
@@ -2117,7 +2117,7 @@ private fun SignUpPage(accountViewModel: AccountViewModel, onOpenLogin: () -> Un
                         accountViewModel.signup(signupUsername, signupEmail, signupPassword)
                     },
                     enabled = !busy && signupUsername.isNotBlank() &&
-                        signupEmail.isNotBlank() && signupPassword.isNotBlank(),
+                            signupEmail.isNotBlank() && signupPassword.isNotBlank(),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Sign up", maxLines = 1, softWrap = false)
@@ -2296,7 +2296,7 @@ private fun RolePage(accountViewModel: AccountViewModel) {
                 item {
                     Text(
                         "You have an approved ${awaitingActivation.requestedRole} application — " +
-                            "redeem your code below to activate it.",
+                                "redeem your code below to activate it.",
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -2350,7 +2350,7 @@ private fun ServerPage(accountViewModel: AccountViewModel) {
                 Text(
                     if (isDefault) {
                         "Using the default server — nothing to type. " +
-                            "Change it below only to test another server."
+                                "Change it below only to test another server."
                     } else {
                         "Using a custom server URL (default overridden)."
                     },

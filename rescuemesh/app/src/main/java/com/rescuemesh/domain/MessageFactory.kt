@@ -113,6 +113,15 @@ class MessageFactory(
      * pair as a Missing report — [photoThumbB64] preview + [photoRef]
      * pointing at this record's OWN full photo — so the dashboard can
      * later compare the found photo against the missing photo of the case.
+     *
+     * FIX7 (19 Nov 2026): [foundArea] is the human place name where the
+     * person was found ("NCU, Sector 23A, Gurugram") — the mirror of a
+     * Missing report's `lastSeenArea`, which is what the dashboard shows
+     * in its AREA column. Before this, the form had no place field at
+     * all: the only location input was numeric lat/lon, which nobody
+     * fills, so the place name ended up typed into `note` and the
+     * dashboard showed "—" for the found report. The numeric
+     * [location] is untouched and still rides along when set.
      */
     fun createPersonFound(
         originDeviceId: String,
@@ -121,7 +130,8 @@ class MessageFactory(
         location: PayloadLocation? = null,
         photoThumbB64: String? = null,
         photoOmitted: Boolean = false,
-        photoRef: PhotoRef? = null
+        photoRef: PhotoRef? = null,
+        foundArea: String? = null
     ): MessageEntity {
         val created = nowMs()
         val messageId = newId()
@@ -129,6 +139,9 @@ class MessageFactory(
             append("{")
             append("\"caseId\":").append(jsonString(caseId))
             append(",\"note\":").append(jsonString(note))
+            foundArea?.takeIf { it.isNotBlank() }?.let {
+                append(",\"foundArea\":").append(jsonString(it))
+            }
             location?.let { append(",\"location\":").append(locationJson(it)) }
             photoThumbB64?.let { append(",\"photoThumb\":").append(jsonString(it)) }
             if (photoOmitted) append(",\"photoOmitted\":true")

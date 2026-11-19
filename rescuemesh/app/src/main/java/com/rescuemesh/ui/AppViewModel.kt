@@ -106,7 +106,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         permissionPromptShown = true
         _statusMessage.value =
             "Missing permissions: ${NearbyPermissions.friendlyLabels(missing)} — " +
-                "tap 1. Grant permissions and allow them, then try again.$settingsHint"
+                    "tap 1. Grant permissions and allow them, then try again.$settingsHint"
         _permissionRequests.tryEmit(Unit)
         return false
     }
@@ -366,13 +366,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         photoThumbB64: String? = null,
         photoOmitted: Boolean = false,
         fullPhotoJpeg: ByteArray? = null,
+        foundArea: String? = null,
         onResult: (MessageCreationResult) -> Unit
     ) {
         val current = profile.value ?: return
         viewModelScope.launch {
             val stored = app.messageRepository.reportPersonFound(
                 current.deviceId, caseId, note, location,
-                photoThumbB64, photoOmitted, fullPhotoJpeg
+                photoThumbB64, photoOmitted, fullPhotoJpeg,
+                foundArea = foundArea
             )
             onResult(MessageCreationResult.Created(stored))
         }

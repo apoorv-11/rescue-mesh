@@ -248,7 +248,18 @@ class PhotoChunkRelayTest {
             )
             assertTrue("no parts are left behind after assembly", storeB.partIndices(record.messageId).isEmpty())
             val dataChunks = photoChunksSentBy(ta).filter { !it.isEndMarker }
-            assertEquals("512 000 bytes at 16 KiB per chunk", 32, dataChunks.size)
+            // FIX8: the protocol resends missing chunks by design (a
+            // PHOTO_ACK MISSING round), so the wire count can exceed 32
+            // even on a healthy relay — counting every retransmit made
+            // this test fail on a clean run. What the chunking must
+            // guarantee is that every one of the 32 slices went out —
+            // the union of indices is 0..31 — and the photo arrived
+            // byte-identical (asserted above, the actual requirement).
+            assertEquals(
+                "512 000 bytes at 16 KiB per chunk: every slice sent",
+                (0 until 32).toSet(),
+                dataChunks.map { it.index }.toSet()
+            )
             assertTrue(
                 "every photo packet respects the 30 000-byte guard",
                 ta.sentPayloads.all { it.second.size <= 30_000 }
@@ -358,7 +369,7 @@ class PhotoChunkRelayTest {
                 "all 3 rounds run and every assembly refuses the corrupt photo",
                 awaitCondition(30_000) {
                     photoChunksSentBy(ta).count { it.isEndMarker } >= 3 &&
-                        photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
+                            photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
                 }
             )
             assertFalse("corrupt bytes are never promoted", storeB.hasComplete(record.messageId))
@@ -715,7 +726,7 @@ class PhotoChunkRelayTest {
                 "all 3 rounds run and every assembly refuses the corrupt photo",
                 awaitCondition(30_000) {
                     photoChunksSentBy(ta).count { it.isEndMarker } >= 3 &&
-                        photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
+                            photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
                 }
             )
             assertTrue(

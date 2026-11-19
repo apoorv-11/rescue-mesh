@@ -298,7 +298,7 @@ private fun RecordsList(viewModel: AppViewModel, status: String?) {
                     expanded = record.messageId in expandedIds,
                     photoDelivered = record.messageId in photoDeliveredIds,
                     foundLinked = record.eventType == "MISSING_PERSON" &&
-                        record.messageId in foundLinkedIds,
+                            record.messageId in foundLinkedIds,
                     onToggle = {
                         expandedIds = if (record.messageId in expandedIds) {
                             expandedIds - record.messageId
@@ -399,7 +399,7 @@ private fun RecordCard(
     foundLinked: Boolean = false
 ) {
     val hasPhotoSection = record.eventType == "MISSING_PERSON" ||
-        record.eventType == "PERSON_FOUND_UPDATE"
+            record.eventType == "PERSON_FOUND_UPDATE"
     val photoState = rememberRecordPhotoState(viewModel, record)
     Box(
         modifier = Modifier
@@ -525,7 +525,7 @@ private fun RecordCard(
                             "Expanded view"
                         } else {
                             "${metaTimeFormat.format(Date(record.createdAt))} · " +
-                                "hops ${record.hopCount}/${record.hopLimit}"
+                                    "hops ${record.hopCount}/${record.hopLimit}"
                         },
                         style = TextStyle(
                             fontFamily = ManropeFamily,
@@ -554,9 +554,9 @@ private fun RecordDetailGrid(record: MessageEntity) {
     val trace = runCatching { HopTrace.parseTrace(record.hopTrace) }.getOrNull()
     val viaLabel = trace?.lastOrNull()?.deviceId?.let { DeviceIds.advertisedLabel(it) }
     val hopsValue = "${record.hopCount} / ${record.hopLimit}" +
-        if (record.hopCount > 0 && viaLabel != null) " · via $viaLabel" else ""
+            if (record.hopCount > 0 && viaLabel != null) " · via $viaLabel" else ""
     val originValue = "${record.originDeviceId.take(13)}… · " +
-        if (record.signature.isNotBlank()) "Verified ✓" else "Not signed"
+            if (record.signature.isNotBlank()) "Verified ✓" else "Not signed"
     val fields = payloadFields(record)
     Column(
         modifier = Modifier.padding(top = 9.dp),
@@ -1206,7 +1206,6 @@ private fun MissingFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
     }
 }
 
-@Composable
 /**
  * One case row in the Found picker's lists (FIX6): radio + summary +
  * id/time line. The same row is used for the main list and for the
@@ -1259,6 +1258,11 @@ private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
     var selectedCaseId by remember { mutableStateOf<String?>(null) }
     var pendingCaseId by remember { mutableStateOf<String?>(null) }
     var showReported by remember { mutableStateOf(false) }
+    // FIX7: the human place name where the person was found — sent as
+    // its own payload key (`foundArea`), mirroring a Missing report's
+    // `lastSeenArea`, so the dashboard can show it. The numeric GPS
+    // location below is separate and stays optional.
+    var foundArea by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var location by remember { mutableStateOf<PayloadLocation?>(null) }
     var photoThumb by remember { mutableStateOf<String?>(null) }
@@ -1316,7 +1320,7 @@ private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Pehle hi found report gayi hui (${split.alreadyReported.size})",
+                            "Found report already sent (${split.alreadyReported.size})",
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(Modifier.weight(1f))
@@ -1327,7 +1331,7 @@ private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
                     }
                     if (showReported) {
                         Text(
-                            "Dobara report sirf jaan-bujh kar — case chunne par pehle confirmation aayegi.",
+                            "A second report is only for a deliberate re-report — selecting a case here asks for confirmation first.",
                             style = MaterialTheme.typography.bodySmall,
                             color = RescueColors.Muted
                         )
@@ -1344,29 +1348,35 @@ private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
             }
         }
         // FIX6 confirmation: a linked case opens the form only after
-        // the user says Haan here; Nahi (or dismiss) leaves the
-        // previous selection untouched.
+        // the user says Yes here; No (or dismiss) leaves the previous
+        // selection untouched. (FIX7: the strings are English now.)
         pendingCaseId?.let { caseId ->
             AlertDialog(
                 onDismissRequest = { pendingCaseId = null },
-                title = { Text("Dobara found report?") },
-                text = { Text("Is case ke liye pehle hi ek found report ja chuki hai. Ek aur report bhejni hai?") },
+                title = { Text("Send another found report?") },
+                text = { Text("A found report has already been sent for this case. Send another one?") },
                 confirmButton = {
                     TextButton(onClick = { selectedCaseId = caseId; pendingCaseId = null }) {
-                        Text("Haan")
+                        Text("Yes")
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingCaseId = null }) {
-                        Text("Nahi")
+                        Text("No")
                     }
                 }
             )
         }
         RmTextField(
+            value = foundArea,
+            onValueChange = { foundArea = it },
+            label = "Found at — area / place name",
+            singleLine = true
+        )
+        RmTextField(
             value = note,
             onValueChange = { note = it },
-            label = "Note — where/when found, condition"
+            label = "Note — when found, condition"
         )
         LocationFields { location = it }
         SecondaryButton(onClick = { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
@@ -1383,13 +1393,17 @@ private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
                         caseId, note, location,
                         photoThumbB64 = photoThumb,
                         photoOmitted = photoOmitted,
-                        fullPhotoJpeg = fullPhoto
+                        fullPhotoJpeg = fullPhoto,
+                        foundArea = foundArea
                     ) { result ->
                         if (result is MessageCreationResult.Created) onCreated()
                     }
                 }
             },
-            enabled = selectedCaseId != null && note.isNotBlank(),
+            // FIX7: the place is required, like a Missing report's
+            // last-seen area — otherwise the dashboard has no location
+            // to show for the found report.
+            enabled = selectedCaseId != null && note.isNotBlank() && foundArea.isNotBlank(),
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Save found update", maxLines = 1, softWrap = false)

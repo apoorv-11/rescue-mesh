@@ -37,7 +37,7 @@ class PrepareGuidesTest {
     fun `no guide is labelled simulated`() {
         for (guide in PrepareGuides.ALL) {
             val text = (listOf(guide.title, guide.summary, guide.source) +
-                guide.sections.flatMap { listOf(it.title) + it.bullets })
+                    guide.sections.flatMap { listOf(it.title) + it.bullets })
                 .joinToString(" ").lowercase()
             assertFalse(guide.id, "simulated" in text)
         }
@@ -68,12 +68,24 @@ class PrepareGuidesTest {
     fun `search finds by word in title, summary or body`() {
         assertEquals(listOf("first-aid"), PrepareGuides.filter(query = "burns").map { it.id })
         // "go-bag" is named in the go-bag guide and in the family plan
-        // (keep a copy in your go-bag) — both match, in list order.
+        // (keep a copy in your go-bag) — and cross-referenced in the
+        // flood, earthquake and fire guides ("keep your go-bag ready",
+        // "keep your go-bag ... in the dark", "your go-bag near the
+        // exit"). Full-text search matches all of them, in list order.
+        // (FIX7: the old expectation listed only go-bag + family-plan
+        // and missed those cross-references — that was the 1 failure
+        // in the 19 Nov test run.)
         assertEquals(
-            listOf("go-bag", "family-plan"),
+            listOf("flood", "earthquake", "fire", "go-bag", "family-plan"),
             PrepareGuides.filter(query = "go-bag").map { it.id }
         )
-        assertEquals(listOf("family-plan"), PrepareGuides.filter(query = "meeting point").map { it.id })
+        // Same story for "meeting point": it is in the family plan,
+        // but also in the fire guide ("agree a meeting point outside")
+        // and in the SOS guide ("know your meeting point ...").
+        assertEquals(
+            listOf("fire", "family-plan", "sos-not-sending"),
+            PrepareGuides.filter(query = "meeting point").map { it.id }
+        )
         assertTrue(PrepareGuides.filter(query = "WATER").map { it.id }.contains("go-bag"))
         assertEquals(9, PrepareGuides.filter(query = "").size)
         assertTrue(PrepareGuides.filter(query = "zzzz-no-such-word").isEmpty())

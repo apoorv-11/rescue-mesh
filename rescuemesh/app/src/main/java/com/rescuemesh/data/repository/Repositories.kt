@@ -227,13 +227,15 @@ class MessageRepository(
         location: com.rescuemesh.domain.PayloadLocation? = null,
         photoThumbB64: String? = null,
         photoOmitted: Boolean = false,
-        fullPhotoJpeg: ByteArray? = null
+        fullPhotoJpeg: ByteArray? = null,
+        foundArea: String? = null
     ): MessageEntity {
         if (fullPhotoJpeg == null) {
             return createAndStore(
                 factory.createPersonFound(
                     originDeviceId, caseId, note, location,
-                    photoThumbB64, photoOmitted
+                    photoThumbB64, photoOmitted,
+                    foundArea = foundArea
                 )
             )
         }
@@ -245,7 +247,8 @@ class MessageRepository(
             photoFactory.createPersonFound(
                 originDeviceId, caseId, note, location,
                 photoThumbB64, photoOmitted,
-                photoRef = PhotoRef.of(messageId, fullPhotoJpeg)
+                photoRef = PhotoRef.of(messageId, fullPhotoJpeg),
+                foundArea = foundArea
             )
         )
         photoStore?.saveComplete(messageId, fullPhotoJpeg)
