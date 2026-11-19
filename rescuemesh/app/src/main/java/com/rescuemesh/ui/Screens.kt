@@ -76,6 +76,10 @@ import com.rescuemesh.crypto.DeviceIds
 import com.rescuemesh.data.local.MessageEntity
 import com.rescuemesh.data.local.MetricsEntity
 import com.rescuemesh.domain.FoundLinkage
+import com.rescuemesh.domain.LocationPillState
+import com.rescuemesh.domain.SavedLocation
+import com.rescuemesh.domain.locationPillState
+import com.rescuemesh.domain.locationPillText
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -131,7 +135,11 @@ fun RescueMeshRoot(
     viewModel: AppViewModel,
     accountViewModel: AccountViewModel,
     prepareViewModel: PrepareViewModel,
-    onRequestPermissions: () -> Unit
+    onRequestPermissions: () -> Unit,
+    /** FIX9: the location permission prompt, fired by Home on first arrival. */
+    onRequestLocationPermissions: () -> Unit,
+    /** FIX11: the app's Settings page, opened from the location pill when permission is permanently denied. */
+    onOpenLocationSettings: () -> Unit
 ) {
     val profile by viewModel.profile.collectAsState()
     if (profile == null) {
@@ -198,7 +206,7 @@ fun RescueMeshRoot(
                     }
                 }
                 else -> when (nav.tab) {
-                    AppTab.HOME -> HomeScreen(viewModel, accountViewModel)
+                    AppTab.HOME -> HomeScreen(viewModel, accountViewModel, onRequestLocationPermissions, onOpenLocationSettings)
                     AppTab.RECORDS -> RecordsScreen(viewModel)
                     AppTab.MESH -> MeshScreen(viewModel, onRequestPermissions)
                     AppTab.ACCOUNT -> AccountTab(viewModel, accountViewModel)
@@ -489,8 +497,90 @@ fun OnboardingScreen(viewModel: AppViewModel) {
  * Interactions unchanged: SOS tap 1 arms / tap 2 sends; I Am Safe is
  * one tap; pill 1 tap → Mesh tab; a mini-record tap → Records tab.
  */
+/**
+ * FIX11 (19 Nov 2026) — the Home location pill, under the status
+ * strip. It shows the phone's saved last-known location when there
+ * is one (tap refreshes it); "Get location" when there is none (tap
+ * fires the Android permission prompt, then fetches); "Locating…"
+ * while a refresh runs; and "Location is blocked" when the permission
+ * is permanently denied (tap opens the app's Settings page, where the
+ * user can allow it — the system prompt will not appear again).
+ * Same pill styling as the status strip above it.
+ */
 @Composable
-fun HomeScreen(viewModel: AppViewModel, accountViewModel: AccountViewModel) {
+private fun LocationPill(
+    state: LocationPillState,
+    saved: SavedLocation?,
+    onGetLocation: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    val (title, subtitle) = locationPillText(state, saved)
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .rmSurface(RoundedCornerShape(14.dp))
+            .clickable {
+                when (state) {
+                    LocationPillState.LOCATED -> onRefresh()
+                    LocationPillState.GET_LOCATION -> onGetLocation()
+                    LocationPillState.BLOCKED -> onOpenSettings()
+                    LocationPillState.LOCATING -> Unit
+                }
+            }
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Box(
+                Modifier.size(8.dp).clip(CircleShape)
+                    .background(
+                        when (state) {
+                            LocationPillState.LOCATED -> RescueColors.SafeGreen
+                            LocationPillState.BLOCKED -> RescueColors.RescueRed
+                            else -> RescueColors.Muted
+                        }
+                    )
+            )
+            Column {
+                Text(
+                    title,
+                    style = TextStyle(
+                        fontFamily = ManropeFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 11.sp,
+                        color = RescueColors.Ink
+                    )
+                )
+                Text(
+                    subtitle,
+                    style = TextStyle(
+                        fontFamily = ManropeFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = RescueColors.Muted
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeScreen(
+    viewModel: AppViewModel,
+    accountViewModel: AccountViewModel,
+    onRequestLocationPermissions: () -> Unit,
+    onOpenLocationSettings: () -> Unit
+) {
+    // FIX9 Kaam 1: on arrival, prepare the saved last-known location —
+    // permission first (asked once per process, through the same system
+    // prompt Nearby uses), then the fix is fetched + saved. Nothing on
+    // this screen waits for it.
+    LaunchedEffect(Unit) {
+        viewModel.ensureHomeLocation(onRequestLocationPermissions)
+    }
     val profile by viewModel.profile.collectAsState()
     val messages by viewModel.messages.collectAsState()
     // FIX6 mark: which Missing cases already have a found report
@@ -502,6 +592,10 @@ fun HomeScreen(viewModel: AppViewModel, accountViewModel: AccountViewModel) {
     val relayOn by viewModel.relayOn.collectAsState()
     val peers by viewModel.livePeers.collectAsState()
     val syncStatus by accountViewModel.syncStatus.collectAsState()
+    // FIX11: the Home location pill's state.
+    val homeLocation by viewModel.homeLocation.collectAsState()
+    val locationLocating by viewModel.locationLocating.collectAsState()
+    val locationBlocked by viewModel.locationBlocked.collectAsState()
     var sosArmed by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -748,6 +842,17 @@ fun HomeScreen(viewModel: AppViewModel, accountViewModel: AccountViewModel) {
                     }
                 }
             }
+        }
+        item {
+            // FIX11: the location pill — saved fix, or "Get location".
+            val pillState = locationPillState(homeLocation, locationLocating, locationBlocked)
+            LocationPill(
+                state = pillState,
+                saved = homeLocation,
+                onGetLocation = onRequestLocationPermissions,
+                onOpenSettings = onOpenLocationSettings,
+                onRefresh = { viewModel.refreshSavedLocation() }
+            )
         }
         // The shared status line (preview silent — kept from the old
         // Home, under the strip): every send / refusal reports here.

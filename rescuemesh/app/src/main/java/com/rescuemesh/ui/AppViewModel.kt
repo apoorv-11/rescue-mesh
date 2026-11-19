@@ -15,9 +15,12 @@ import com.rescuemesh.crypto.DeviceIds
 import com.rescuemesh.data.repository.metricsToCsv
 import com.rescuemesh.domain.PayloadLocation
 import com.rescuemesh.domain.Role
+import com.rescuemesh.domain.SavedLocation
+import com.rescuemesh.domain.chooseFormLocation
 import com.rescuemesh.mesh.IncomingPayload
 import com.rescuemesh.mesh.MeshPeer
 import com.rescuemesh.mesh.NearbyPermissions
+import com.rescuemesh.net.LocationFetcher
 import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -302,6 +305,110 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ------------------------------------------------------------ FIX9 location
+    // The saved last-known location (LocationStore): Home fetches it on
+    // arrival, the forms' Fill from GPS resolves through it, and the
+    // repository / engine / gateway read it at record time. Nothing here
+    // ever blocks a record on location — every read is best-effort and
+    // a missing fix just means "no location".
+
+    /** True once the Home location-permission prompt has been fired this process. */
+    private var homeLocationAskDone = false
+
+    /**
+     * FIX11: the fix the Home pill shows (null = none saved yet).
+     * Seeded from the store so a fix from an earlier session shows
+     * immediately, before any refresh.
+     */
+    private val _homeLocation = MutableStateFlow(app.locationStore.savedLocation())
+    val homeLocation: StateFlow<SavedLocation?> = _homeLocation.asStateFlow()
+
+    /** FIX11: true while a location refresh (last-known + fresh fix) is running. */
+    private val _locationLocating = MutableStateFlow(false)
+    val locationLocating: StateFlow<Boolean> = _locationLocating.asStateFlow()
+
+    /** FIX11: true when location permission is permanently denied (no more system prompt). */
+    private val _locationBlocked = MutableStateFlow(false)
+    val locationBlocked: StateFlow<Boolean> = _locationBlocked.asStateFlow()
+
+    fun setLocationBlocked(blocked: Boolean) {
+        _locationBlocked.value = blocked
+    }
+
+    fun markLocationPermissionAsked() {
+        app.locationStore.markPermissionAsked()
+    }
+
+    fun wasLocationPermissionAsked(): Boolean = app.locationStore.wasPermissionAsked()
+
+    /** Publishes whatever the store currently holds (after any save). */
+    private fun publishSavedLocation() {
+        _homeLocation.value = app.locationStore.savedLocation()
+    }
+
+    /**
+     * Home arrival (FIX9 Kaam 1): with permission, refresh the saved fix;
+     * without it, ask once (through the existing permission prompt —
+     * the same system dialog Nearby uses, no separate flow). Later
+     * arrivals only refresh when permission is already granted.
+     */
+    fun ensureHomeLocation(requestPermission: () -> Unit) {
+        if (LocationFetcher.hasPermission(app.applicationContext)) {
+            refreshSavedLocation()
+            return
+        }
+        if (homeLocationAskDone) return
+        homeLocationAskDone = true
+        requestPermission()
+    }
+
+    /**
+     * Refreshes the saved fix: the OS last-known first (instant), then a
+     * best-effort fresh fix in the background — a newer / better fix
+     * replaces the saved one, a stale one never does. Fire-and-forget;
+     * failure changes nothing. The Home pill's state follows it.
+     */
+    fun refreshSavedLocation() {
+        viewModelScope.launch {
+            _locationLocating.value = true
+            try {
+                val context = app.applicationContext
+                runCatching { LocationFetcher.lastKnown(context) }.getOrNull()
+                    ?.let { app.locationStore.save(it) }
+                publishSavedLocation()
+                runCatching { LocationFetcher.freshFix(context) }.getOrNull()
+                    ?.let { app.locationStore.save(it) }
+                publishSavedLocation()
+            } finally {
+                _locationLocating.value = false
+            }
+        }
+    }
+
+    /** FIX11: refreshes only when nothing is saved yet (the return-from-Settings path). */
+    fun refreshSavedLocationIfMissing() {
+        if (_homeLocation.value == null) refreshSavedLocation()
+    }
+
+    /**
+     * The forms' Fill from GPS (FIX9 Kaam 3): a fresh GPS fix first
+     * (up to 8 s), else the saved last-known, else the OS last-known —
+     * and the fix it returns is saved for the next record. Null only
+     * when no fix exists anywhere. Never throws.
+     */
+    suspend fun resolveFormLocation(): SavedLocation? {
+        val context = app.applicationContext
+        val fresh = runCatching { LocationFetcher.freshFix(context) }.getOrNull()
+        if (fresh != null) {
+            app.locationStore.save(fresh)
+            publishSavedLocation()
+        }
+        // Fresh wins, else the saved last-known (the pure rule).
+        chooseFormLocation(fresh, app.locationStore.savedLocation())?.let { return it }
+        return runCatching { LocationFetcher.lastKnown(context) }.getOrNull()
+            ?.also { app.locationStore.save(it); publishSavedLocation() }
+    }
+
     // ------------------------------------------------------------ Prompt 6
     // Records & forms: per-type Room flows for the lists / Found picker, and
     // the form submissions. Every submission goes through the repository
@@ -347,13 +454,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         photoThumbB64: String?,
         photoOmitted: Boolean,
         fullPhotoJpeg: ByteArray? = null,
+        /** FIX9 Kaam 3: the form's numeric location (Fill from GPS / typed). */
+        location: PayloadLocation? = null,
         onResult: (MessageCreationResult) -> Unit
     ) {
         val current = profile.value ?: return
         viewModelScope.launch {
             val stored = app.messageRepository.reportMissingPerson(
                 current.deviceId, name, age, description, lastSeenArea,
-                lastSeenAtMs, photoThumbB64, photoOmitted, fullPhotoJpeg
+                lastSeenAtMs, photoThumbB64, photoOmitted, fullPhotoJpeg,
+                location = location
             )
             onResult(MessageCreationResult.Created(stored))
         }

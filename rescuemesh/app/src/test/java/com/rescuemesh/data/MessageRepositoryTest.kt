@@ -8,6 +8,9 @@ import com.rescuemesh.crypto.HopTrace
 import com.rescuemesh.data.repository.MessageCreationResult
 import com.rescuemesh.data.repository.MessageRepository
 import com.rescuemesh.domain.MessageFactory
+import com.rescuemesh.domain.PayloadLocation
+import com.rescuemesh.domain.SavedLocation
+import com.rescuemesh.domain.SavedLocationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -33,7 +36,10 @@ class MessageRepositoryTest {
     private var clock = 1_700_000_000_000L
     private var idCounter = 0
 
-    private fun newRepository(dao: InMemoryMessageDao): MessageRepository {
+    private fun newRepository(
+        dao: InMemoryMessageDao,
+        locationProvider: SavedLocationProvider? = null
+    ): MessageRepository {
         val factory = MessageFactory(
             nowMs = { clock },
             newId = { "00000000-0000-4000-8000-%012d".format(++idCounter) }
@@ -43,7 +49,8 @@ class MessageRepositoryTest {
             signer = alice.envelopeSigner,
             hopSigner = alice.hopSigner,
             factory = factory,
-            nowMs = { clock }
+            nowMs = { clock },
+            locationProvider = locationProvider
         )
     }
 
@@ -108,5 +115,71 @@ class MessageRepositoryTest {
         }
         val result = repo.sendSos(alice.deviceId)
         assertTrue(result is MessageCreationResult.Created)
+    }
+
+    // FIX9 (19 Nov 2026) — the saved last-known location: quick SOS and
+    // I Am Safe embed it automatically, origin entry 0 carries it as
+    // `loc`, and without a saved fix both records go exactly as before.
+    private fun savedLocationProvider(): SavedLocationProvider =
+        { SavedLocation(12.971, 77.594, PayloadLocation.SOURCE_LAST_KNOWN, clock) }
+
+    @Test
+    fun `quick SOS embeds the saved location and origin entry carries loc`() = runBlocking {
+        val dao = InMemoryMessageDao()
+        val repo = newRepository(dao, savedLocationProvider())
+        val result = repo.sendSos(alice.deviceId, "MEDICAL")
+        assertTrue(result is MessageCreationResult.Created)
+        val stored = (result as MessageCreationResult.Created).message
+        assertTrue(stored.payload.contains(""""location":{"lat":"12.971","lon":"77.594","source":"LAST_KNOWN"}"""))
+        val trace = HopTrace.parseTrace(stored.hopTrace)!!
+        assertEquals(1, trace.size)
+        assertEquals("12.971,77.594", trace[0].loc)
+        assertEquals(listOf(true), HopTrace.validateTrace(trace, stored.messageId, alice.deviceId))
+        assertTrue(EnvelopeSigner.verifyEnvelope(stored, alice.rawPublicKey))
+    }
+
+    @Test
+    fun `safety check-in embeds the saved location`() = runBlocking {
+        val dao = InMemoryMessageDao()
+        val repo = newRepository(dao, savedLocationProvider())
+        val stored = repo.sendSafetyCheckin(alice.deviceId)
+        assertTrue(stored.payload.contains(""""location":{"lat":"12.971","lon":"77.594","source":"LAST_KNOWN"}"""))
+        val trace = HopTrace.parseTrace(stored.hopTrace)!!
+        assertEquals("12.971,77.594", trace[0].loc)
+    }
+
+    @Test
+    fun `without a saved location SOS and check-in have no location and no hop loc`() = runBlocking {
+        val dao = InMemoryMessageDao()
+        val repo = newRepository(dao)
+        val sos = (repo.sendSos(alice.deviceId, "MEDICAL") as MessageCreationResult.Created).message
+        assertTrue(!sos.payload.contains("location"))
+        assertEquals(null, HopTrace.parseTrace(sos.hopTrace)!![0].loc)
+        val checkin = repo.sendSafetyCheckin(alice.deviceId)
+        assertTrue(!checkin.payload.contains("location"))
+        assertEquals(null, HopTrace.parseTrace(checkin.hopTrace)!![0].loc)
+    }
+
+    @Test
+    fun `resource update - the form include-location reaches the payload`() = runBlocking {
+        val dao = InMemoryMessageDao()
+        val repo = newRepository(dao)
+        val gps = PayloadLocation("12.971", "77.594", "GPS")
+        val stored = repo.postResourceUpdate(alice.deviceId, "BEDS", 5, "Community hall", gps)
+        assertTrue(stored.payload.contains(""""location":{"lat":"12.971","lon":"77.594","source":"GPS"}"""))
+        val without = repo.postResourceUpdate(alice.deviceId, "BEDS", 5, "Community hall", null)
+        assertTrue(!without.payload.contains("location"))
+    }
+
+    @Test
+    fun `missing person - the form location reaches the payload`() = runBlocking {
+        val dao = InMemoryMessageDao()
+        val repo = newRepository(dao)
+        val gps = PayloadLocation("12.971", "77.594", "GPS")
+        val stored = repo.reportMissingPerson(
+            alice.deviceId, description = "x", lastSeenArea = "Sector 48",
+            lastSeenAtMs = clock, location = gps
+        )
+        assertTrue(stored.payload.contains(""""location":{"lat":"12.971","lon":"77.594","source":"GPS"}"""))
     }
 }

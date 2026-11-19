@@ -8,6 +8,7 @@ import com.rescuemesh.data.local.MessageEntity
 import com.rescuemesh.data.local.MetricsDao
 import com.rescuemesh.data.local.MetricsEntity
 import com.rescuemesh.domain.LocalState
+import com.rescuemesh.domain.SavedLocationProvider
 import com.rescuemesh.mesh.ServerAck
 import com.rescuemesh.mesh.ServerAckStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -106,7 +107,15 @@ class GatewaySync(
      * runs AFTER the record batches, never before, and never changes a
      * record's state. See [PhotoSync].
      */
-    private val photoSync: PhotoSync? = null
+    private val photoSync: PhotoSync? = null,
+    /**
+     * FIX9 Kaam 4 (19 Nov 2026): the saved last-known location, read —
+     * never awaited — when this phone appends its GATEWAY entry to a
+     * relayed record at upload time. Null keeps the pre-FIX9 behaviour
+     * (entries without loc). Production wires
+     * `locationStore::savedLocation`. The `net` field is untouched.
+     */
+    private val locationProvider: SavedLocationProvider? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val ownPublicKeyB64: String = DeviceIds.base64UrlEncode(ownPublicKey)
@@ -279,7 +288,7 @@ class GatewaySync(
             }.getOrNull()
             if (photo != null && photo.hasActivity) {
                 photoLine = " Photos: ${photo.uploaded} uploaded, ${photo.failed} failed (will retry)" +
-                    if (photo.unsupported > 0) ", server photo upload not supported yet." else "."
+                        if (photo.unsupported > 0) ", server photo upload not supported yet." else "."
             }
         }
 
@@ -287,7 +296,7 @@ class GatewaySync(
             "Nothing to sync — no stored records are waiting for the server."
         } else {
             "Synced: $accepted new, $alreadyExists already on server, " +
-                "$rejected rejected, ack unverified for $unverified records."
+                    "$rejected rejected, ack unverified for $unverified records."
         }
         return finish(summary + photoLine, runStartedAt, success = true, countsSummary = summary + photoLine)
     }
@@ -319,6 +328,10 @@ class GatewaySync(
             trace = trace,
             role = HopTrace.ROLE_GATEWAY,
             at = nowMs(),
+            // FIX9 Kaam 4: this gateway phone's saved last-known location
+            // (loc is optional — without a saved fix the entry is exactly
+            // as before, and old entries stay valid).
+            loc = runCatching { locationProvider?.invoke()?.toHopLoc() }.getOrNull(),
             net = net
         )
         val newTrace = trace + gatewayEntry

@@ -37,7 +37,7 @@ class PrepareGuidesTest {
     fun `no guide is labelled simulated`() {
         for (guide in PrepareGuides.ALL) {
             val text = (listOf(guide.title, guide.summary, guide.source) +
-                    guide.sections.flatMap { listOf(it.title) + it.bullets })
+                guide.sections.flatMap { listOf(it.title) + it.bullets })
                 .joinToString(" ").lowercase()
             assertFalse(guide.id, "simulated" in text)
         }

@@ -11,6 +11,7 @@ import com.rescuemesh.data.local.MetricsEntity
 import com.rescuemesh.domain.LocalState
 import com.rescuemesh.domain.PhotoRef
 import com.rescuemesh.domain.PhotoStore
+import com.rescuemesh.domain.SavedLocationProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -29,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
  * [backoffBaseMs] are injectable so JVM tests can drive timeouts, backoff
  * and TTL behaviour with short clocks instead of the production values;
  * production keeps the contract defaults (10 s ACK timeout, backoff
- * `min(2^attempts × 1 s, 30 s)`, 15 s purge, 30 s cooldown, 30 000-byte
+ * `min(2^attempts × 1 s, 30 s)`, 15 s purge, 30 s cooldown, 35 000-byte
  * packet guard, max 3 attempts per peer per record per session).
  */
 data class RelayConfig(
@@ -38,7 +39,29 @@ data class RelayConfig(
     val ttlTestMode: Boolean = false,
     val maxAttemptsPerPeer: Int = 3,
     val cooldownMs: Long = 30_000,
-    val packetSizeLimit: Int = 30_000,
+    /**
+     * FIX10 (19 Nov 2026): raised 30,000 → 35,000 so the worst-case
+     * record fits at the new 50-hop limit (FIX9 measured it: a Missing
+     * record with a full 12,000-char photoThumb is 32,798 bytes at 50
+     * hops — 2,798 over the old guard — so the mesh dropped it on send
+     * AND on receipt and it stopped relaying after hopCount 42). 35,000
+     * leaves ~2,200 bytes of headroom for long free-text fields (name /
+     * area / note have no length cap, unlike the 280-char SOS
+     * description). This ONE value is the guard everywhere: the MSG
+     * send check, the incoming-packet drop, the HELLO fallback and the
+     * photo-chunk check all read it, so raising it here raises all of
+     * them together. The photoThumb cap (12,000) needs no change — it
+     * already fits under this guard.
+     *
+     * One honest caveat: this is the APP's guard. The bytes underneath
+     * travel as one Nearby `Payload.fromBytes` (see NearbyTransport);
+     * if Play Services itself refuses a ~33–35 KB byte payload, the
+     * send fails at the transport instead (SendResult.success = false,
+     * retried like any failed attempt) — the device gate for this fix
+     * is two phones relaying a max-thumb Missing record, which proves
+     * the transport accepts it.
+     */
+    val packetSizeLimit: Int = 35_000,
     val backoffBaseMs: Long = 1_000,
     val maxBackoffMs: Long = 30_000,
     /** Photo transfer (design doc): wait for a PHOTO_ACK after an END marker. */
@@ -92,7 +115,14 @@ class RelayEngine(
     private val photoDeliveryStore: PhotoDeliveryStore = NoOpPhotoDeliveryStore(),
     private val gatewayProvider: () -> Boolean = { false },
     private val config: RelayConfig = RelayConfig(),
-    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /**
+     * FIX9 Kaam 4 (19 Nov 2026): the saved last-known location, read —
+     * never awaited — when this phone appends its RELAY entry to a
+     * record it stores. Null keeps the pre-FIX9 behaviour (entries
+     * without loc). Production wires `locationStore::savedLocation`.
+     */
+    private val locationProvider: SavedLocationProvider? = null
 ) {
     private val ownLabel: String = DeviceIds.advertisedLabel(ownDeviceId)
     private val ownPublicKeyBase64Url: String = DeviceIds.base64UrlEncode(ownPublicKey)
@@ -806,11 +836,15 @@ class RelayEngine(
         }
         // Append OUR relay entry after validation, before storing (§2), and
         // persist-then-ACK: the ACK only goes out once Room has the record.
+        // FIX9 Kaam 4: the entry carries this phone's saved last-known
+        // location (loc is optional — without a saved fix the entry is
+        // exactly as before, and old entries stay valid).
         val ownEntry = hopSigner.appendEntry(
             messageId = envelope.messageId,
             trace = trace,
             role = HopTrace.ROLE_RELAY,
-            at = nowMs
+            at = nowMs,
+            loc = runCatching { locationProvider?.invoke()?.toHopLoc() }.getOrNull()
         )
         val newTrace = trace + ownEntry
         val stored = envelope.copy(

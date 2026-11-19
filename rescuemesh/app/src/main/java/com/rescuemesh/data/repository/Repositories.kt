@@ -13,9 +13,11 @@ import com.rescuemesh.crypto.EnvelopeSigner
 import com.rescuemesh.crypto.HopSigner
 import com.rescuemesh.crypto.HopTrace
 import com.rescuemesh.domain.MessageFactory
+import com.rescuemesh.domain.PayloadLocation
 import com.rescuemesh.domain.PhotoRef
 import com.rescuemesh.domain.PhotoStore
 import com.rescuemesh.domain.Role
+import com.rescuemesh.domain.SavedLocationProvider
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 
@@ -99,7 +101,14 @@ class MessageRepository(
     private val hopSigner: HopSigner? = null,
     private val factory: MessageFactory = MessageFactory(),
     private val nowMs: () -> Long = { System.currentTimeMillis() },
-    private val photoStore: PhotoStore? = null
+    private val photoStore: PhotoStore? = null,
+    /**
+     * FIX9 (19 Nov 2026): the saved last-known location, read — never
+     * awaited — at creation time. Null keeps the pre-FIX9 behaviour
+     * (no location anywhere). Production wires
+     * `locationStore::savedLocation`; tests pass a lambda.
+     */
+    private val locationProvider: SavedLocationProvider? = null
 ) {
     fun observeMessages(): Flow<List<MessageEntity>> = messageDao.observeAll()
 
@@ -118,9 +127,24 @@ class MessageRepository(
      * stored as-is — the pre-Prompt-5 behaviour, kept for tests that build
      * the repository without an identity.
      */
+    /**
+     * The saved fix as a payload location, or null when there is none.
+     * Never throws: a misbehaving provider must never break record
+     * creation — the record simply goes without location.
+     */
+    private fun savedPayloadLocation(): PayloadLocation? =
+        runCatching { locationProvider?.invoke()?.toPayloadLocation() }.getOrNull()
+
+    /** The saved fix as a hop-entry `loc` string, or null when there is none. Never throws. */
+    private fun savedHopLoc(): String? =
+        runCatching { locationProvider?.invoke()?.toHopLoc() }.getOrNull()
+
     private suspend fun createAndStore(draft: MessageEntity): MessageEntity {
         val withEntry0 = if (hopSigner != null && hopSigner.deviceId == draft.originDeviceId) {
-            val entry0 = hopSigner.originEntry(draft.messageId, draft.createdAt)
+            // FIX9 Kaam 4: entry 0 carries this phone's saved last-known
+            // location (loc is optional — without a saved fix the entry
+            // is exactly as before, and old entries stay valid).
+            val entry0 = hopSigner.originEntry(draft.messageId, draft.createdAt, loc = savedHopLoc())
             draft.copy(hopTrace = HopTrace.traceToJson(listOf(entry0)), hopCount = 0)
         } else {
             draft
@@ -140,7 +164,12 @@ class MessageRepository(
      */
     suspend fun sendSos(originDeviceId: String, category: String? = null): MessageCreationResult {
         sosGuardRefusal(originDeviceId)?.let { return it }
-        return MessageCreationResult.Created(createAndStore(factory.createSos(originDeviceId, category)))
+        // FIX9 Kaam 2: the saved last-known location embeds automatically —
+        // no user action, no checkbox. Without a saved fix the SOS goes
+        // exactly as before, never delayed by location.
+        return MessageCreationResult.Created(
+            createAndStore(factory.createSos(originDeviceId, category, savedPayloadLocation()))
+        )
     }
 
     /** The §4.9 guard, shared by every SOS creation path (quick SOS and the Prompt 6 form). */
@@ -155,7 +184,8 @@ class MessageRepository(
 
     /** One-tap I Am Safe; funnelled (entry 0 + sign + store) like SOS. */
     suspend fun sendSafetyCheckin(originDeviceId: String): MessageEntity =
-        createAndStore(factory.createSafetyCheckin(originDeviceId))
+        // FIX9 Kaam 2: same automatic embed as quick SOS.
+        createAndStore(factory.createSafetyCheckin(originDeviceId, savedPayloadLocation()))
 
     // ------------------------------------------------ Prompt 6 form paths
     // All of these go through the same creation funnel as quick SOS
@@ -193,13 +223,16 @@ class MessageRepository(
         lastSeenAtMs: Long,
         photoThumbB64: String? = null,
         photoOmitted: Boolean = false,
-        fullPhotoJpeg: ByteArray? = null
+        fullPhotoJpeg: ByteArray? = null,
+        /** FIX9 Kaam 3: the form's numeric location (Fill from GPS / typed) — rides as payload.location. */
+        location: PayloadLocation? = null
     ): MessageEntity {
         if (fullPhotoJpeg == null) {
             return createAndStore(
                 factory.createMissingPerson(
                     originDeviceId, name, age, description, lastSeenArea,
-                    lastSeenAtMs, photoThumbB64, photoOmitted
+                    lastSeenAtMs, photoThumbB64, photoOmitted,
+                    location = location
                 )
             )
         }
@@ -213,7 +246,8 @@ class MessageRepository(
             photoFactory.createMissingPerson(
                 originDeviceId, name, age, description, lastSeenArea,
                 lastSeenAtMs, photoThumbB64, photoOmitted,
-                photoRef = PhotoRef.of(messageId, fullPhotoJpeg)
+                photoRef = PhotoRef.of(messageId, fullPhotoJpeg),
+                location = location
             )
         )
         photoStore?.saveComplete(messageId, fullPhotoJpeg)

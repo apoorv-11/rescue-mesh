@@ -22,6 +22,7 @@ import com.rescuemesh.net.ApiClientSyncApi
 import com.rescuemesh.net.ApiResult
 import com.rescuemesh.net.GatewaySync
 import com.rescuemesh.net.InternetChecker
+import com.rescuemesh.net.LocationStore
 import com.rescuemesh.net.PhotoSync
 import com.rescuemesh.net.ServerConfig
 import com.rescuemesh.net.SyncKeyStore
@@ -100,6 +101,16 @@ class RescueMeshApp : Application() {
     lateinit var gatewaySync: GatewaySync
         private set
 
+    /**
+     * FIX9 (19 Nov 2026): the saved last-known location (SharedPreferences,
+     * [LocationStore]) — read, never awaited, by the repository (SOS /
+     * check-in payload + origin hop entry), the relay engine (RELAY
+     * entries) and the gateway sync (GATEWAY entries), and refreshed by
+     * Home / the forms' Fill from GPS. Survives process death.
+     */
+    lateinit var locationStore: LocationStore
+        private set
+
     private val appScope = CoroutineScope(Dispatchers.IO)
 
     override fun onCreate() {
@@ -108,11 +119,13 @@ class RescueMeshApp : Application() {
         deviceIdentity = DeviceIdentity.loadOrCreate(this)
         profileRepository = ProfileRepository(database.profileDao()) { deviceIdentity.originDeviceId }
         photoStore = PhotoStore(filesDir)
+        locationStore = LocationStore(this)
         messageRepository = MessageRepository(
             database.messageDao(),
             deviceIdentity.envelopeSigner(),
             deviceIdentity.hopSigner(),
-            photoStore = photoStore
+            photoStore = photoStore,
+            locationProvider = locationStore::savedLocation
         )
         peerRepository = PeerRepository(database.peerDao())
         metricsRepository = MetricsRepository(database.metricsDao())
@@ -156,7 +169,8 @@ class RescueMeshApp : Application() {
             ownPublicKey = deviceIdentity.rawPublicKey,
             internetChecker = internetChecker,
             networkTypeProvider = { currentNetworkType() },
-            photoSync = photoSync
+            photoSync = photoSync,
+            locationProvider = locationStore::savedLocation
         )
         registerGatewayNetworkCallback()
         // FIX5 periodic sync (app closed): WorkManager re-runs the

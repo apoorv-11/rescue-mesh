@@ -1,14 +1,21 @@
 package com.rescuemesh
 
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rescuemesh.mesh.NearbyPermissions
+import com.rescuemesh.net.LocationFetcher
 import com.rescuemesh.ui.AccountViewModel
 import com.rescuemesh.ui.AppViewModel
 import com.rescuemesh.ui.PrepareViewModel
@@ -17,9 +24,25 @@ import com.rescuemesh.ui.RescueMeshTheme
 
 class MainActivity : ComponentActivity() {
 
+    // FIX11: the AppViewModel, kept as a field so onResume can refresh
+    // the saved location when the user returns from Settings.
+    private lateinit var appViewModel: AppViewModel
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* Result is visible when the user starts the mesh; Nearby reports failures there. */ }
+
+    override fun onResume() {
+        super.onResume()
+        // FIX11: returning from Settings with location newly granted —
+        // Home's one-shot prompt won't re-fire, so clear the blocked
+        // flag and fetch when nothing is saved yet. Guarded by the
+        // saved fix, so it never runs again once one exists.
+        if (::appViewModel.isInitialized && LocationFetcher.hasPermission(this)) {
+            appViewModel.setLocationBlocked(false)
+            appViewModel.refreshSavedLocationIfMissing()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,15 +85,53 @@ class MainActivity : ComponentActivity() {
             .isAppearanceLightStatusBars = true
         setContent {
             RescueMeshTheme {
-                val appViewModel: AppViewModel = viewModel()
+                appViewModel = viewModel()
                 val accountViewModel: AccountViewModel = viewModel()
                 val prepareViewModel: PrepareViewModel = viewModel()
+                // FIX9 (19 Nov 2026): the location permission prompt for the
+                // Home fetch — the SAME system dialog shape Nearby uses
+                // (RequestMultiplePermissions), not a new flow. On grant,
+                // the saved fix is refreshed right away; on denial Home
+                // simply never has a fix, and nothing is blocked by it.
+                // FIX11: the denial is now classified — permanently
+                // blocked only when Android will no longer show the
+                // prompt (no rationale) AND we have asked before, so a
+                // first denial still gets the popup on the next pill tap.
+                val locationLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestMultiplePermissions()
+                ) { result ->
+                    if (result.values.any { it }) {
+                        appViewModel.setLocationBlocked(false)
+                        appViewModel.refreshSavedLocation()
+                    } else {
+                        val noRationale = !ActivityCompat.shouldShowRequestPermissionRationale(
+                            this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
+                        )
+                        if (noRationale && appViewModel.wasLocationPermissionAsked()) {
+                            appViewModel.setLocationBlocked(true)
+                        }
+                    }
+                }
                 RescueMeshRoot(
                     viewModel = appViewModel,
                     accountViewModel = accountViewModel,
                     prepareViewModel = prepareViewModel,
                     onRequestPermissions = {
                         permissionLauncher.launch(NearbyPermissions.requiredRuntimePermissions())
+                    },
+                    onRequestLocationPermissions = {
+                        appViewModel.markLocationPermissionAsked()
+                        locationLauncher.launch(LocationFetcher.LOCATION_PERMISSIONS)
+                    },
+                    // FIX11: the pill's Settings path — the app's own
+                    // Settings page, where location can be allowed after
+                    // a permanent denial (the system prompt is gone then).
+                    onOpenLocationSettings = {
+                        startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            }
+                        )
                     }
                 )
             }

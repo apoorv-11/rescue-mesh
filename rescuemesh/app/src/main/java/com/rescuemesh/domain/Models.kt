@@ -82,8 +82,30 @@ object PriorityRules {
         EventType.ANNOUNCEMENT, EventType.RESOURCE_UPDATE, EventType.SAFETY_CHECKIN -> NORMAL
     }
 
-    /** Default hop limit for a new envelope (protocol default from Doc 2). */
-    const val DEFAULT_HOP_LIMIT = 8
+    /**
+     * Default hop limit for a new envelope (protocol default from Doc 2).
+     *
+     * FIX9 (19 Nov 2026): raised 8 → 50 on the user's decision — at 8 a
+     * record could die on the hop limit before ever reaching a gateway
+     * in a long relay chain. The server has no cap of its own (it only
+     * checks hopCount <= hopLimit), so no server change is needed, and
+     * old records keep their own hopLimit 8. Note the honest cost,
+     * measured for this fix (hop50-measurement.py, replicating
+     * CanonicalJson + the MSG packet shape): a 50-hop trace (51 entries,
+     * all with loc) is 19,713 bytes of the 30,000-byte packet guard, so
+     * text records still fit easily (quick SOS: 20,230 bytes; maxed
+     * detailed SOS: 20,627). But a Missing record with a full
+     * 12,000-char photoThumb reaches 32,798 bytes at 50 hops — 2,798
+     * over the guard — and the mesh drops oversize packets on send AND
+     * on receipt, so it stops relaying (it survives up to hopCount 42:
+     * 43 entries = 29,694 bytes, 44 entries = 30,082). The guard itself
+     * is unchanged by this fix.
+     *
+     * The hop limit is NOT a lifetime: record age is still bound by TTL
+     * (SOS 24 h, check-in 12 h, Missing/Found 72 h, Resource 12 h) — 50
+     * hops only buys more route inside the same lifetime.
+     */
+    const val DEFAULT_HOP_LIMIT = 50
 }
 
 object TtlRules {

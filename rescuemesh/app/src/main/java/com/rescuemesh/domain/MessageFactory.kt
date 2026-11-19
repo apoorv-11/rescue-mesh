@@ -19,14 +19,26 @@ class MessageFactory(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val newId: () -> String = { UUID.randomUUID().toString() }
 ) {
-    /** Quick 2-tap Home SOS: the existing minimal payload (contracts §7 keeps it valid). */
-    fun createSos(originDeviceId: String, category: String? = null): MessageEntity {
+    /**
+     * Quick 2-tap Home SOS: the existing minimal payload (contracts §7 keeps it valid).
+     *
+     * FIX9 (19 Nov 2026): [location] is the phone's saved last-known fix,
+     * embedded automatically by the repository — the user taps nothing and
+     * no checkbox exists. Absent when there is no saved fix: the record
+     * goes without location, never delayed by it.
+     */
+    fun createSos(
+        originDeviceId: String,
+        category: String? = null,
+        location: PayloadLocation? = null
+    ): MessageEntity {
         val created = nowMs()
         val payload = buildString {
             append("{")
             append("\"category\":").append(jsonString(category ?: "OTHER"))
             append(",\"description\":\"\"")
             append(",\"peopleCount\":1")
+            location?.let { append(",\"location\":").append(locationJson(it)) }
             append("}")
         }
         return base(EventType.SOS, originDeviceId, created, category, payload)
@@ -64,9 +76,24 @@ class MessageFactory(
         return base(EventType.SOS, originDeviceId, created, category, payload)
     }
 
-    fun createSafetyCheckin(originDeviceId: String): MessageEntity {
+    /**
+     * One-tap I Am Safe.
+     *
+     * FIX9 (19 Nov 2026): [location] is the phone's saved last-known fix,
+     * embedded automatically by the repository — same rule as quick SOS:
+     * present when a fix is saved, omitted when there is none, and the
+     * check-in never waits for one.
+     */
+    fun createSafetyCheckin(
+        originDeviceId: String,
+        location: PayloadLocation? = null
+    ): MessageEntity {
         val created = nowMs()
-        val payload = "{\"status\":\"SAFE\"}"
+        val payload = buildString {
+            append("{\"status\":\"SAFE\"")
+            location?.let { append(",\"location\":").append(locationJson(it)) }
+            append("}")
+        }
         return base(EventType.SAFETY_CHECKIN, originDeviceId, created, null, payload)
     }
 
@@ -77,6 +104,13 @@ class MessageFactory(
      * [photoThumbB64] is included only when the caller already applied the
      * PhotoThumb size rule; [photoOmitted] is set (true) only when a photo
      * was picked but exceeded the cap.
+     *
+     * FIX9 (19 Nov 2026): [location] is the form's numeric location
+     * (Fill from GPS / typed lat-lon). The Missing form had NO location
+     * input at all before this — its only "location" was the
+     * `lastSeenArea` text — so a GPS fix could never reach the payload;
+     * the form now carries LocationFields like the other forms and this
+     * key rides alongside `lastSeenArea` (the dashboard pins on it).
      */
     fun createMissingPerson(
         originDeviceId: String,
@@ -87,7 +121,8 @@ class MessageFactory(
         lastSeenAtMs: Long,
         photoThumbB64: String? = null,
         photoOmitted: Boolean = false,
-        photoRef: PhotoRef? = null
+        photoRef: PhotoRef? = null,
+        location: PayloadLocation? = null
     ): MessageEntity {
         val created = nowMs()
         val messageId = newId()
@@ -99,6 +134,7 @@ class MessageFactory(
             append(",\"description\":").append(jsonString(description))
             append(",\"lastSeenArea\":").append(jsonString(lastSeenArea))
             append(",\"lastSeenAt\":").append(lastSeenAtMs)
+            location?.let { append(",\"location\":").append(locationJson(it)) }
             photoThumbB64?.let { append(",\"photoThumb\":").append(jsonString(it)) }
             if (photoOmitted) append(",\"photoOmitted\":true")
             photoRef?.let { append(",\"photoRef\":").append(photoRefJson(it)) }

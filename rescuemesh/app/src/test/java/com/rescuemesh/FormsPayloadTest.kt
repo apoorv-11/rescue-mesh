@@ -51,8 +51,8 @@ class FormsPayloadTest {
         )
         assertEquals(
             """{"category":"MEDICAL","description":"Trapped under debris","peopleCount":3,"injured":1,""" +
-                    """"needs":["WATER","MEDICINE"],"vulnerable":["CHILD"],""" +
-                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+                """"needs":["WATER","MEDICINE"],"vulnerable":["CHILD"],""" +
+                """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
             sos.payload
         )
         assertEquals(1, sos.priority)
@@ -93,8 +93,8 @@ class FormsPayloadTest {
         )
         assertEquals(
             """{"caseId":"${missing.messageId}","name":"Asha","age":9,""" +
-                    """"description":"Red jacket, short hair","lastSeenArea":"MG Road",""" +
-                    """"lastSeenAt":1699990000000,"photoThumb":"aBc123_-"}""",
+                """"description":"Red jacket, short hair","lastSeenArea":"MG Road",""" +
+                """"lastSeenAt":1699990000000,"photoThumb":"aBc123_-"}""",
             missing.payload
         )
         assertFalse(missing.payload.contains("photoOmitted"))
@@ -114,7 +114,7 @@ class FormsPayloadTest {
         )
         assertEquals(
             """{"caseId":"${missing.messageId}","description":"Unknown","lastSeenArea":"Station",""" +
-                    """"lastSeenAt":1699990000000,"photoOmitted":true}""",
+                """"lastSeenAt":1699990000000,"photoOmitted":true}""",
             missing.payload
         )
     }
@@ -124,7 +124,7 @@ class FormsPayloadTest {
         val found = factory.createPersonFound("device-a", "case-42", "Found at the shelter", gps)
         assertEquals(
             """{"caseId":"case-42","note":"Found at the shelter",""" +
-                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+                """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
             found.payload
         )
         assertEquals(2, found.priority)
@@ -144,7 +144,7 @@ class FormsPayloadTest {
         )
         assertEquals(
             """{"caseId":"case-42","note":"Safe","foundArea":"NCU, Sector 23A, Gurugram",""" +
-                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+                """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
             withArea.payload
         )
 
@@ -176,7 +176,7 @@ class FormsPayloadTest {
         val withNote = factory.createResourceUpdate("device-a", "BEDS", 5, note = "Community hall", location = gps)
         assertEquals(
             """{"resourceType":"BEDS","quantity":5,"note":"Community hall",""" +
-                    """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
+                """"location":{"lat":"12.971","lon":"77.594","source":"GPS"}}""",
             withNote.payload
         )
     }
@@ -196,6 +196,48 @@ class FormsPayloadTest {
         val loc = PayloadLocation.of(12.97149, 77.59423, PayloadLocation.SOURCE_GPS)
         assertEquals("12.971", loc.lat)
         assertEquals("77.594", loc.lon)
+    }
+
+    // FIX9 (19 Nov 2026) — quick SOS and I Am Safe embed the saved
+    // last-known location automatically; without one the key is omitted
+    // (never null), and the record is otherwise unchanged.
+    @Test
+    fun `quick SOS - saved location embeds in the payload, absent when none`() {
+        val saved = PayloadLocation("12.971", "77.594", PayloadLocation.SOURCE_LAST_KNOWN)
+        val withLocation = factory.createSos("device-a", "MEDICAL", saved)
+        assertEquals(
+            """{"category":"MEDICAL","description":"","peopleCount":1,"location":{"lat":"12.971","lon":"77.594","source":"LAST_KNOWN"}}""",
+            withLocation.payload
+        )
+        val without = factory.createSos("device-a", "MEDICAL")
+        assertEquals("""{"category":"MEDICAL","description":"","peopleCount":1}""", without.payload)
+        assertFalse(without.payload.contains("location"))
+    }
+
+    @Test
+    fun `safety check-in - saved location embeds in the payload, absent when none`() {
+        val saved = PayloadLocation("12.971", "77.594", PayloadLocation.SOURCE_LAST_KNOWN)
+        val withLocation = factory.createSafetyCheckin("device-a", saved)
+        assertEquals(
+            """{"status":"SAFE","location":{"lat":"12.971","lon":"77.594","source":"LAST_KNOWN"}}""",
+            withLocation.payload
+        )
+        val without = factory.createSafetyCheckin("device-a")
+        assertEquals("""{"status":"SAFE"}""", without.payload)
+        assertFalse(without.payload.contains("location"))
+    }
+
+    @Test
+    fun `missing person - form location rides as its own key, absent when none`() {
+        val withLocation = factory.createMissingPerson(
+            "device-a", description = "x", lastSeenArea = "Sector 48",
+            lastSeenAtMs = fixedNow, location = gps
+        )
+        assertTrue(withLocation.payload.contains(""""location":{"lat":"12.971","lon":"77.594","source":"GPS"}"""))
+        val without = factory.createMissingPerson(
+            "device-a", description = "x", lastSeenArea = "Sector 48", lastSeenAtMs = fixedNow
+        )
+        assertFalse(without.payload.contains("location"))
     }
 
     @Test

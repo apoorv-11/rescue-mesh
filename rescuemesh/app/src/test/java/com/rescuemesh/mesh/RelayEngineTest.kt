@@ -61,7 +61,8 @@ class RelayEngineTest {
         dao: InMemoryMessageDao,
         metrics: InMemoryMetricsDao = InMemoryMetricsDao(),
         ackStore: ServerAckStore = NoOpServerAckStore(),
-        config: RelayConfig = fastConfig()
+        config: RelayConfig = fastConfig(),
+        locationProvider: com.rescuemesh.domain.SavedLocationProvider? = null
     ) = RelayEngine(
         transport = transport,
         messageDao = dao,
@@ -70,7 +71,8 @@ class RelayEngineTest {
         ownDeviceId = identity.deviceId,
         ownPublicKey = identity.rawPublicKey,
         serverAckStore = ackStore,
-        config = config
+        config = config,
+        locationProvider = locationProvider
     )
 
     private fun repositoryFor(identity: TestIdentity, dao: InMemoryMessageDao, factory: MessageFactory) =
@@ -245,6 +247,44 @@ class RelayEngineTest {
         assertEquals(listOf(true, true, true), HopTrace.validateTrace(traceC, sos.messageId, a.deviceId))
         // After two relays the origin signature still verifies (the §1 point).
         assertTrue(EnvelopeSigner.verifyEnvelope(storedByC, a.rawPublicKey))
+    }
+
+    // FIX9 Kaam 4 — B's RELAY entry carries B's own saved last-known
+    // location (not A's): the entry is B's, so the loc is B's.
+    @Test
+    fun `relay append carries the relay phone's saved location`() = runBlocking {
+        val a = TestIdentity()
+        val b = TestIdentity()
+        val daoA = InMemoryMessageDao()
+        val daoB = InMemoryMessageDao()
+        val now = System.currentTimeMillis()
+        val sos = createSos(a, daoA, MessageFactory(nowMs = { now }, newId = { "sos-loc-1" }), "MEDICAL")
+
+        val (ta, tb) = pairedTransports(a.label, b.label)
+        val ea = engineFor(a, ta, daoA)
+        val eb = engineFor(
+            b, tb, daoB,
+            locationProvider = {
+                com.rescuemesh.domain.SavedLocation(
+                    28.613, 77.209,
+                    com.rescuemesh.domain.PayloadLocation.SOURCE_LAST_KNOWN, now
+                )
+            }
+        )
+        startPair(ea, ta, a, eb, tb, b)
+        try {
+            assertTrue("B should store the SOS", awaitCondition { daoB.getById(sos.messageId) != null })
+        } finally {
+            ea.stop(); eb.stop()
+        }
+        val storedByB = daoB.getById(sos.messageId)!!
+        val traceB = HopTrace.parseTrace(storedByB.hopTrace)!!
+        assertEquals(2, traceB.size)
+        // Entry 0 is A's (no loc — A's repo had no provider); entry 1 is
+        // B's relay entry with B's saved location.
+        assertEquals(null, traceB[0].loc)
+        assertEquals("28.613,77.209", traceB[1].loc)
+        assertEquals(listOf(true, true), HopTrace.validateTrace(traceB, sos.messageId, a.deviceId))
     }
 
     @Test

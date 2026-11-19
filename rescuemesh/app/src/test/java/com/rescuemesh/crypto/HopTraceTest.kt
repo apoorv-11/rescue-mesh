@@ -88,6 +88,35 @@ class HopTraceTest {
         assertFalse(HopTrace.verifyEntry(entry0.copy(loc = null), messageId))
     }
 
+    // FIX9 Kaam 4 — every hop role carries its own phone's saved location
+    // and the whole chain still validates; a trace that mixes loc and
+    // no-loc entries (old records) is valid too.
+    @Test
+    fun `origin relay and gateway entries with loc validate as a chain`() {
+        val entry0 = alice.hopSigner.originEntry(messageId, at = t0, loc = "12.971,77.594")
+        val entry1 = bob.hopSigner.appendEntry(
+            messageId, listOf(entry0), HopTrace.ROLE_RELAY, at = t0 + 5_000, loc = "28.613,77.209"
+        )
+        val entry2 = carol.hopSigner.appendEntry(
+            messageId, listOf(entry0, entry1), HopTrace.ROLE_GATEWAY, at = t0 + 10_000,
+            loc = "19.076,72.877", net = HopTrace.NET_WIFI
+        )
+        assertEquals(listOf("12.971,77.594", "28.613,77.209", "19.076,72.877"), listOf(entry0, entry1, entry2).map { it.loc })
+        assertEquals(HopTrace.NET_WIFI, entry2.net)
+        assertEquals(
+            listOf(true, true, true),
+            HopTrace.validateTrace(listOf(entry0, entry1, entry2), messageId, alice.deviceId)
+        )
+        // JSON round-trip keeps loc on every entry.
+        val parsed = HopTrace.parseTrace(HopTrace.traceToJson(listOf(entry0, entry1, entry2)))
+        assertEquals(listOf(entry0, entry1, entry2), parsed)
+        // An entry without loc (an old record, or a phone with no saved
+        // fix) still validates next to entries that have one.
+        val noLoc = alice.hopSigner.originEntry(messageId, at = t0)
+        val relayNoLoc = bob.hopSigner.appendEntry(messageId, listOf(noLoc), HopTrace.ROLE_RELAY, at = t0 + 5_000)
+        assertEquals(listOf(true, true), HopTrace.validateTrace(listOf(noLoc, relayNoLoc), messageId, alice.deviceId))
+    }
+
     @Test
     fun `tampered entries fail - time, signature, and the pk binding`() {
         val entry0 = alice.hopSigner.originEntry(messageId, at = t0)

@@ -16,11 +16,17 @@
          team's Android 13+ phones during Gate 1b (14 Nov 2026). -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
-        android:maxSdkVersion="28" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:minSdkVersion="29"
-        android:maxSdkVersion="32" />
+    <!-- Location (FIX12, 19 Nov 2026): the app's OWN location use — the
+         Home pill, Fill from GPS, SOS / check-in pins, hop trails — NOT
+         Nearby scanning (BLUETOOTH_SCAN above carries neverForLocation).
+         These must NOT be SDK-gated: the old caps (COARSE to 28, FINE
+         29–32) meant Android 13+ (SDK 33+, incl. the team's Android 15/16
+         test phones) declared NEITHER permission — so the system never
+         showed the permission popup, every request auto-denied, and
+         LocationManager returned nothing. No background location is
+         needed: every fetch happens while the app is in the foreground. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"
         android:minSdkVersion="31" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"

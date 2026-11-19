@@ -14,5 +14,5 @@ package com.rescuemesh
  * counts. Bump the value on every delivered build.
  */
 object BuildInfo {
-    const val TAG = "19Nov-FIX8"
+    const val TAG = "19Nov-FIX11"
 }

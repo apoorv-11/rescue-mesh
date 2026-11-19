@@ -127,4 +127,57 @@ class PacketCodecTest {
         assertNull(decodeWith(goodMap + ("payload" to listOf(1L)))) // payload not an object
         assertNull(decodeWith(goodMap + ("hopTrace" to "none"))) // hopTrace not an array
     }
+
+    // FIX10 (19 Nov 2026) — the worst case at the 50-hop limit must fit
+    // the packet guard: a Missing record with a full 12,000-char
+    // photoThumb and a 51-entry trace (origin + 49 relay + gateway,
+    // every entry with its loc). At the old 30,000 guard this encoded
+    // to 32,798 bytes and the mesh dropped it on send AND on receipt;
+    // the guard is now 35,000. The trace is built with three real
+    // signers cycling (the same shape a real relay chain has), and the
+    // packet still decodes — the guard, not the codec, was the limit.
+    @Test
+    fun `worst case at 50 hops - max-thumb Missing MSG fits the packet guard`() {
+        val carol = TestIdentity()
+        val signers = listOf(alice.hopSigner, bob.hopSigner, carol.hopSigner)
+        val draft = MessageFactory(nowMs = { fixedNow }, newId = { "msg-50hop" })
+            .createMissingPerson(
+                alice.deviceId, description = "x".repeat(280),
+                lastSeenArea = "Sector 48, Gurugram", lastSeenAtMs = fixedNow,
+                photoThumbB64 = "C".repeat(12_000)
+            )
+        val entries = mutableListOf<com.rescuemesh.crypto.HopEntry>()
+        val entry0 = alice.hopSigner.originEntry(
+            draft.messageId, draft.createdAt, loc = HopTrace.formatLoc(12.971, 77.594)
+        )
+        entries += entry0
+        for (i in 1..49) {
+            entries += signers[i % signers.size].appendEntry(
+                draft.messageId, entries.toList(), HopTrace.ROLE_RELAY,
+                at = fixedNow + i * 60_000L,
+                loc = HopTrace.formatLoc(12.971 + i * 0.001, 77.594)
+            )
+        }
+        entries += carol.hopSigner.appendEntry(
+            draft.messageId, entries.toList(), HopTrace.ROLE_GATEWAY,
+            at = fixedNow + 50 * 60_000L,
+            loc = HopTrace.formatLoc(19.076, 72.877), net = HopTrace.NET_CELLULAR
+        )
+        assertEquals(51, entries.size)
+        val traced = draft.copy(
+            hopTrace = HopTrace.traceToJson(entries),
+            hopCount = 50,
+            hopLimit = 50
+        )
+        val signed = alice.envelopeSigner.signedCopy(traced)
+        val bytes = PacketCodec.encode(RelayPacket.Msg(signed))
+        assertTrue(
+            "worst-case 50-hop MSG is ${bytes.size} bytes, over the ${RelayConfig().packetSizeLimit}-byte guard",
+            bytes.size <= RelayConfig().packetSizeLimit
+        )
+        // The packet still decodes to the same envelope.
+        val decoded = PacketCodec.decode(bytes) as RelayPacket.Msg
+        assertEquals(signed.messageId, decoded.envelope.messageId)
+        assertEquals(50, decoded.envelope.hopCount)
+    }
 }

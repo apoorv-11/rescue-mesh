@@ -68,7 +68,11 @@ class RelayService : Service() {
                 photoStore = app.photoStore,
                 photoDeliveryStore = app.photoDeliveryStore,
                 gatewayProvider = { app.internetChecker.online.value },
-                config = RelayConfig(ttlTestMode = ttlTestMode)
+                config = RelayConfig(ttlTestMode = ttlTestMode),
+                // FIX9 Kaam 4: the relay phone's saved last-known location
+                // rides on its RELAY hop entries (loc is optional — without
+                // a saved fix the entries are exactly as before).
+                locationProvider = app.locationStore::savedLocation
             )
         }
         engine?.start()

@@ -122,7 +122,10 @@ class GatewaySyncTest {
         val sync: GatewaySync
     )
 
-    private fun fixture(userToken: String? = "user-token"): Fixture {
+    private fun fixture(
+        userToken: String? = "user-token",
+        locationProvider: com.rescuemesh.domain.SavedLocationProvider? = null
+    ): Fixture {
         val messageDao = InMemoryMessageDao()
         val metricsDao = InMemoryMetricsDao()
         val ackDao = InMemoryServerAckDao()
@@ -142,7 +145,8 @@ class GatewaySyncTest {
             ownPublicKey = gateway.rawPublicKey,
             internetChecker = checker,
             networkTypeProvider = { "WIFI" },
-            nowMs = { clock }
+            nowMs = { clock },
+            locationProvider = locationProvider
         )
         return Fixture(messageDao, metricsDao, ackDao, keyCache, api, sync)
     }
@@ -201,6 +205,38 @@ class GatewaySyncTest {
         assertEquals(1, ownTrace.size)
         assertEquals(0, uploadedOwn.envelope.hopCount)
         assertEquals(DeviceIds.base64UrlEncode(gateway.rawPublicKey), uploadedOwn.originPublicKey)
+    }
+
+    // FIX9 Kaam 4 — the GATEWAY entry carries this gateway phone's saved
+    // last-known location (its own loc, not the origin's), and the entry
+    // still validates; without a saved fix the entry is exactly as before.
+    @Test
+    fun `gateway append carries the gateway phone's saved location`() = runBlocking {
+        val f = fixture(
+            locationProvider = {
+                com.rescuemesh.domain.SavedLocation(
+                    19.076, 72.877,
+                    com.rescuemesh.domain.PayloadLocation.SOURCE_LAST_KNOWN, clock
+                )
+            }
+        )
+        val relayed = relayedRecord()
+        f.messageDao.insertIfAbsent(relayed)
+
+        f.sync.syncNow()
+
+        assertEquals(1, f.api.batchCalls.size)
+        val uploadedRelayed = f.api.batchCalls[0].second.items
+            .first { it.envelope.messageId == relayed.messageId }
+        val relayedTrace = HopTrace.parseTrace(uploadedRelayed.envelope.hopTrace.toString())!!
+        assertEquals(2, relayedTrace.size)
+        assertEquals(HopTrace.ROLE_GATEWAY, relayedTrace[1].role)
+        assertEquals("19.076,72.877", relayedTrace[1].loc)
+        assertEquals("WIFI", relayedTrace[1].net)
+        assertEquals(listOf(true, true), HopTrace.validateTrace(relayedTrace, relayed.messageId, origin.deviceId))
+        // Persisted to the stored row too.
+        val storedRelayed = f.messageDao.getById(relayed.messageId)!!
+        assertEquals("19.076,72.877", HopTrace.parseTrace(storedRelayed.hopTrace)!![1].loc)
     }
 
     @Test

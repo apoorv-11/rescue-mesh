@@ -369,7 +369,7 @@ class PhotoChunkRelayTest {
                 "all 3 rounds run and every assembly refuses the corrupt photo",
                 awaitCondition(30_000) {
                     photoChunksSentBy(ta).count { it.isEndMarker } >= 3 &&
-                            photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
+                        photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
                 }
             )
             assertFalse("corrupt bytes are never promoted", storeB.hasComplete(record.messageId))
@@ -726,7 +726,7 @@ class PhotoChunkRelayTest {
                 "all 3 rounds run and every assembly refuses the corrupt photo",
                 awaitCondition(30_000) {
                     photoChunksSentBy(ta).count { it.isEndMarker } >= 3 &&
-                            photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
+                        photoAcksSentBy(tb).count { it.status == PacketCodec.PHOTO_MISSING } >= 3
                 }
             )
             assertTrue(

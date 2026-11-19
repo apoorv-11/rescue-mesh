@@ -25,13 +25,13 @@ class EnvelopeSignerTest {
         private lateinit var originDeviceId: String
         private lateinit var signer: EnvelopeSigner
 
-    private fun generateKeyset(): KeysetHandle = KeysetHandle.newBuilder()
-        .addEntry(
-            KeysetHandle.generateEntryFromParameters(PredefinedSignatureParameters.ED25519WithRawOutput)
-                .withRandomId()
-                .makePrimary()
-        )
-        .build()
+        private fun generateKeyset(): KeysetHandle = KeysetHandle.newBuilder()
+            .addEntry(
+                KeysetHandle.generateEntryFromParameters(PredefinedSignatureParameters.ED25519WithRawOutput)
+                    .withRandomId()
+                    .makePrimary()
+            )
+            .build()
 
         @JvmStatic
         @BeforeClass
@@ -124,13 +124,16 @@ class EnvelopeSignerTest {
     fun `canonical form of a factory SOS has the exact expected shape`() {
         // Batch contracts §1: the signed set is the 8 origin-fixed fields —
         // hopCount and hopTrace are NOT signed (relays mutate them).
+        // FIX9 (19 Nov 2026): DEFAULT_HOP_LIMIT 8 → 50 — the canonical
+        // form carries the new default; nothing else in the signed set
+        // changed.
         val message = factory.createSos(originDeviceId, "MEDICAL")
         val canonical = String(EnvelopeSigner.canonicalBytes(message), Charsets.UTF_8)
         assertEquals(
             """{"createdAt":1700000000000,"eventType":"SOS","expiresAt":1700086400000,""" +
-                """"hopLimit":8,"messageId":"${message.messageId}",""" +
-                """"originDeviceId":"$originDeviceId","payload":{"category":"MEDICAL",""" +
-                """"description":"","peopleCount":1},"priority":1}""",
+                    """"hopLimit":50,"messageId":"${message.messageId}",""" +
+                    """"originDeviceId":"$originDeviceId","payload":{"category":"MEDICAL",""" +
+                    """"description":"","peopleCount":1},"priority":1}""",
             canonical
         )
     }
@@ -143,7 +146,7 @@ class EnvelopeSignerTest {
         val relayed = signed.copy(
             hopCount = 1,
             hopTrace = """[{"i":0,"role":"ORIGIN","deviceId":"$originDeviceId",""" +
-                """"pk":"x","at":1700000000000,"prevSig":"","sig":"y"}]"""
+                    """"pk":"x","at":1700000000000,"prevSig":"","sig":"y"}]"""
         )
         assertTrue(EnvelopeSigner.verifyEnvelope(relayed, rawPublicKey))
     }

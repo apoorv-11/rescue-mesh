@@ -1,9 +1,6 @@
 package com.rescuemesh.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
-import android.location.LocationManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -70,7 +67,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.rescuemesh.crypto.DeviceIds
 import com.rescuemesh.crypto.HopTrace
 import com.rescuemesh.crypto.JsonParser
@@ -84,6 +80,7 @@ import com.rescuemesh.domain.PhotoPreview
 import com.rescuemesh.domain.PhotoPreviewSource
 import com.rescuemesh.domain.PhotoThumb
 import com.rescuemesh.domain.Role
+import com.rescuemesh.net.LocationFetcher
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -298,7 +295,7 @@ private fun RecordsList(viewModel: AppViewModel, status: String?) {
                     expanded = record.messageId in expandedIds,
                     photoDelivered = record.messageId in photoDeliveredIds,
                     foundLinked = record.eventType == "MISSING_PERSON" &&
-                            record.messageId in foundLinkedIds,
+                        record.messageId in foundLinkedIds,
                     onToggle = {
                         expandedIds = if (record.messageId in expandedIds) {
                             expandedIds - record.messageId
@@ -399,7 +396,7 @@ private fun RecordCard(
     foundLinked: Boolean = false
 ) {
     val hasPhotoSection = record.eventType == "MISSING_PERSON" ||
-            record.eventType == "PERSON_FOUND_UPDATE"
+        record.eventType == "PERSON_FOUND_UPDATE"
     val photoState = rememberRecordPhotoState(viewModel, record)
     Box(
         modifier = Modifier
@@ -525,7 +522,7 @@ private fun RecordCard(
                             "Expanded view"
                         } else {
                             "${metaTimeFormat.format(Date(record.createdAt))} · " +
-                                    "hops ${record.hopCount}/${record.hopLimit}"
+                                "hops ${record.hopCount}/${record.hopLimit}"
                         },
                         style = TextStyle(
                             fontFamily = ManropeFamily,
@@ -554,9 +551,9 @@ private fun RecordDetailGrid(record: MessageEntity) {
     val trace = runCatching { HopTrace.parseTrace(record.hopTrace) }.getOrNull()
     val viaLabel = trace?.lastOrNull()?.deviceId?.let { DeviceIds.advertisedLabel(it) }
     val hopsValue = "${record.hopCount} / ${record.hopLimit}" +
-            if (record.hopCount > 0 && viaLabel != null) " · via $viaLabel" else ""
+        if (record.hopCount > 0 && viaLabel != null) " · via $viaLabel" else ""
     val originValue = "${record.originDeviceId.take(13)}… · " +
-            if (record.signature.isNotBlank()) "Verified ✓" else "Not signed"
+        if (record.signature.isNotBlank()) "Verified ✓" else "Not signed"
     val fields = payloadFields(record)
     Column(
         modifier = Modifier.padding(top = 9.dp),
@@ -1083,7 +1080,7 @@ private fun SosFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
         ChipRows(MessageFactory.SOS_NEEDS, needs.value) { needs.value = needs.value.toggle(it) }
         Kicker("Vulnerable people")
         ChipRows(MessageFactory.SOS_VULNERABLE, vulnerable.value) { vulnerable.value = vulnerable.value.toggle(it) }
-        LocationFields { location = it }
+        LocationFields(viewModel) { location = it }
         refusal?.let { Text(it, color = Color(0xFFB3261E), fontWeight = FontWeight.SemiBold) }
         PrimaryButton(
             onClick = {
@@ -1124,6 +1121,11 @@ private fun MissingFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
     var fullPhoto by remember { mutableStateOf<ByteArray?>(null) }
     var photoNote by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // FIX9 Kaam 3: the Missing form had no location input at all — its
+    // only "location" was the lastSeenArea text — so a GPS fix could
+    // never reach the payload. It now carries LocationFields like the
+    // other forms; the fix rides as payload.location next to lastSeenArea.
+    var location by remember { mutableStateOf<PayloadLocation?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -1168,6 +1170,7 @@ private fun MissingFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
             singleLine = true
         )
         DateTimeFields(dateText, timeText, { dateText = it }, { timeText = it }, label = "Last seen (date / time)")
+        LocationFields(viewModel) { location = it }
         SecondaryButton(onClick = { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
@@ -1189,7 +1192,8 @@ private fun MissingFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
                         lastSeenAtMs = lastSeenAt,
                         photoThumbB64 = photoThumb,
                         photoOmitted = photoOmitted,
-                        fullPhotoJpeg = fullPhoto
+                        fullPhotoJpeg = fullPhoto,
+                        location = location
                     ) { result ->
                         when (result) {
                             is MessageCreationResult.Created -> onCreated()
@@ -1378,7 +1382,7 @@ private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
             onValueChange = { note = it },
             label = "Note — when found, condition"
         )
-        LocationFields { location = it }
+        LocationFields(viewModel) { location = it }
         SecondaryButton(onClick = { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
@@ -1481,7 +1485,7 @@ private fun ResourceFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
             onValueChange = { note = it },
             label = "Note (optional)"
         )
-        LocationFields { location = it }
+        LocationFields(viewModel) { location = it }
         PrimaryButton(
             onClick = {
                 viewModel.submitResourceUpdate(resourceType, quantity, note.ifBlank { null }, location) { result ->
@@ -1560,21 +1564,39 @@ private fun Stepper(label: String, value: Int, min: Int, max: Int, onChange: (In
 
 /**
  * Location consent (OFF by default) + manual lat/lon fields + a
- * "fill from GPS" button. The button reads the LocationManager's
- * LAST-KNOWN fix (no new dependencies, no live location request) and is
- * guarded by the existing location permissions; without a fix or a
- * permission the fields simply stay manual. Coordinates are emitted as
- * [PayloadLocation] with exactly 3 decimals, source MANUAL for typed
- * values and LAST_KNOWN for the GPS fill.
+ * "fill from GPS" button. Coordinates are emitted as [PayloadLocation]
+ * with exactly 3 decimals, source MANUAL for typed values, GPS for a
+ * fresh fix and LAST_KNOWN for the saved last-known.
+ *
+ * FIX9 (19 Nov 2026) — the button was broken on real phones, and the
+ * cause was threefold: (1) on Android 13+ the Nearby permission flow
+ * never asks for location at all (its list has no location entry), so
+ * the old permission check silently failed; (2) the button only ever
+ * read the OS last-known fix, which is null on a fresh phone that never
+ * used location, and it never tried a FRESH fix; (3) when it failed,
+ * the only feedback was a small grey note. The fill now (a) asks for
+ * the location permission when it is missing (same system prompt shape
+ * Nearby uses) and re-runs on grant, (b) tries a fresh GPS fix first,
+ * (c) falls back to the phone's saved last-known location, and (d)
+ * says plainly when neither exists — it never silently does nothing.
+ * The consent toggle is unchanged: the location only reaches the
+ * payload when the user switched it on AND coordinates are present.
  */
 @Composable
-private fun LocationFields(onLocationChange: (PayloadLocation?) -> Unit) {
+private fun LocationFields(viewModel: AppViewModel, onLocationChange: (PayloadLocation?) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var consent by remember { mutableStateOf(false) }
     var latText by remember { mutableStateOf("") }
     var lonText by remember { mutableStateOf("") }
     var source by remember { mutableStateOf(PayloadLocation.SOURCE_MANUAL) }
     var note by remember { mutableStateOf<String?>(null) }
+    var locating by remember { mutableStateOf(false) }
+    // Set when the permission prompt was granted and the fill must run
+    // now — the launcher's callback only flips this flag; the effect
+    // below runs the fill (a callback cannot call it directly, it is
+    // declared after the launcher).
+    var pendingFillAfterPermission by remember { mutableStateOf(false) }
 
     fun emit() {
         val lat = latText.toDoubleOrNull()
@@ -1582,6 +1604,51 @@ private fun LocationFields(onLocationChange: (PayloadLocation?) -> Unit) {
         onLocationChange(
             if (consent && lat != null && lon != null) PayloadLocation.of(lat, lon, source) else null
         )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.any { it }) {
+            pendingFillAfterPermission = true
+        } else {
+            note = "Location permission denied — allow it in Settings → Apps → RescueMesh → Permissions, or type the coordinates."
+        }
+    }
+
+    fun fillFromGps() {
+        if (!LocationFetcher.hasPermission(context)) {
+            note = "Location permission is needed — allow it when asked, then tap Fill from GPS again."
+            permissionLauncher.launch(LocationFetcher.LOCATION_PERMISSIONS)
+            return
+        }
+        if (locating) return
+        locating = true
+        note = "Locating…"
+        scope.launch {
+            val resolved = viewModel.resolveFormLocation()
+            locating = false
+            if (resolved != null) {
+                latText = String.format(Locale.US, "%.3f", resolved.lat)
+                lonText = String.format(Locale.US, "%.3f", resolved.lon)
+                source = resolved.source
+                note = if (resolved.source == PayloadLocation.SOURCE_GPS) {
+                    "Filled from a fresh GPS fix."
+                } else {
+                    "Filled from this phone's last known location."
+                }
+                emit()
+            } else {
+                note = "No location available — turn on location/GPS and try again, or type the coordinates."
+            }
+        }
+    }
+
+    LaunchedEffect(pendingFillAfterPermission) {
+        if (pendingFillAfterPermission) {
+            pendingFillAfterPermission = false
+            fillFromGps()
+        }
     }
 
     ToggleRow(
@@ -1612,43 +1679,13 @@ private fun LocationFields(onLocationChange: (PayloadLocation?) -> Unit) {
             )
         }
         SecondaryButton(
-            onClick = {
-                val fix = lastKnownLocation(context)
-                if (fix != null) {
-                    latText = String.format(Locale.US, "%.3f", fix.first)
-                    lonText = String.format(Locale.US, "%.3f", fix.second)
-                    source = PayloadLocation.SOURCE_LAST_KNOWN
-                    note = "Filled from this phone's last known GPS fix."
-                    emit()
-                } else {
-                    note = "No GPS fix available — type the coordinates, or leave them blank."
-                }
-            },
+            onClick = { fillFromGps() },
+            enabled = !locating,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Fill from GPS", maxLines = 1, softWrap = false)
+            Text(if (locating) "Locating…" else "Fill from GPS", maxLines = 1, softWrap = false)
         }
         note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-    }
-}
-
-/** The last-known GPS (or network) fix, or null without permission / any fix. Never throws. */
-private fun lastKnownLocation(context: android.content.Context): Pair<Double, Double>? {
-    val fine = ContextCompat.checkSelfPermission(
-        context, Manifest.permission.ACCESS_FINE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
-    val coarse = ContextCompat.checkSelfPermission(
-        context, Manifest.permission.ACCESS_COARSE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
-    if (!fine && !coarse) return null
-    val manager = context.getSystemService(LocationManager::class.java) ?: return null
-    return try {
-        val gps = manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        val network = manager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-        val fix = gps ?: network
-        fix?.let { it.latitude to it.longitude }
-    } catch (e: SecurityException) {
-        null
     }
 }
 
