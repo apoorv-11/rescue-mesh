@@ -75,6 +75,7 @@ import com.rescuemesh.BuildInfo
 import com.rescuemesh.crypto.DeviceIds
 import com.rescuemesh.data.local.MessageEntity
 import com.rescuemesh.data.local.MetricsEntity
+import com.rescuemesh.domain.FoundLinkage
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -492,6 +493,11 @@ fun OnboardingScreen(viewModel: AppViewModel) {
 fun HomeScreen(viewModel: AppViewModel, accountViewModel: AccountViewModel) {
     val profile by viewModel.profile.collectAsState()
     val messages by viewModel.messages.collectAsState()
+    // FIX6 mark: which Missing cases already have a found report
+    // stored on this phone (own or relayed) — same local linkage as
+    // the Found picker's cap and the Records list.
+    val foundUpdates by viewModel.messagesOfType("PERSON_FOUND_UPDATE").collectAsState()
+    val foundLinkedIds = remember(foundUpdates) { FoundLinkage.linkedCaseIds(foundUpdates) }
     val status by viewModel.statusMessage.collectAsState()
     val relayOn by viewModel.relayOn.collectAsState()
     val peers by viewModel.livePeers.collectAsState()
@@ -800,7 +806,12 @@ fun HomeScreen(viewModel: AppViewModel, accountViewModel: AccountViewModel) {
             }
         }
         items(messages.take(3)) { message ->
-            MiniRecordCard(viewModel, message) { viewModel.selectTab(AppTab.RECORDS) }
+            MiniRecordCard(
+                viewModel,
+                message,
+                foundLinked = message.eventType == "MISSING_PERSON" &&
+                    message.messageId in foundLinkedIds
+            ) { viewModel.selectTab(AppTab.RECORDS) }
         }
         if (messages.isEmpty()) {
             item {
@@ -865,7 +876,8 @@ private fun SosTargetMotif() {
 private fun MiniRecordCard(
     viewModel: AppViewModel,
     record: MessageEntity,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    foundLinked: Boolean = false
 ) {
     val photoState = rememberRecordPhotoState(viewModel, record)
     Box(
@@ -920,6 +932,19 @@ private fun MiniRecordCard(
                             color = RescueColors.Muted
                         )
                     )
+                    // FIX6 mark: this Missing case already has a found
+                    // report stored on this phone.
+                    if (foundLinked) {
+                        Text(
+                            "Found reported",
+                            style = TextStyle(
+                                fontFamily = ManropeFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = Color(0xFF0B6B4F)
+                            )
+                        )
+                    }
                 }
                 StateChip(record.localState)
             }

@@ -177,6 +177,22 @@ h1, h2, h3 { font-family: "Archivo", "Manrope", sans-serif; margin: 0; letter-sp
   object-fit: contain; border-radius: 10px; display: block;
 }
 .lightbox-cap { color: #dbe7f5; font-size: 13px; font-weight: 600; }
+.found-strip { padding: 10px 16px 2px; display: grid; gap: 8px; }
+.found-strip-head { color: var(--muted); font-size: 12.5px; font-weight: 700; }
+.found-strip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.found-strip figure { margin: 0; position: relative; background: var(--surface-2); border-radius: 8px; overflow: hidden; }
+.found-strip img { width: 100%; height: 96px; object-fit: cover; display: block; }
+.found-strip img.clickable { cursor: zoom-in; }
+.found-strip figcaption {
+  position: absolute; left: 6px; bottom: 6px;
+  background: rgba(10, 20, 30, .78); color: #fff;
+  font-size: 10.5px; font-weight: 800; border-radius: 6px; padding: 2px 7px;
+}
+.found-strip .nophoto {
+  height: 96px; display: grid; place-items: center; color: var(--muted);
+  font-weight: 700; font-size: 12px; text-align: center; padding: 8px;
+}
+.found-strip .lightbox img { width: auto; height: auto; max-width: 92vw; max-height: 86vh; }
 .case-photos figcaption {
   position: absolute; left: 8px; bottom: 8px;
   background: rgba(10, 20, 30, .78); color: #fff;

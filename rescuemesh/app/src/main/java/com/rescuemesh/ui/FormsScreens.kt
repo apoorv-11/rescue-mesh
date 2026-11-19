@@ -76,6 +76,7 @@ import com.rescuemesh.crypto.HopTrace
 import com.rescuemesh.crypto.JsonParser
 import com.rescuemesh.data.local.MessageEntity
 import com.rescuemesh.data.repository.MessageCreationResult
+import com.rescuemesh.domain.FoundLinkage
 import com.rescuemesh.domain.MessageFactory
 import com.rescuemesh.domain.PayloadLocation
 import com.rescuemesh.domain.PhotoFull
@@ -243,6 +244,11 @@ fun RecordsScreen(viewModel: AppViewModel) {
 private fun RecordsList(viewModel: AppViewModel, status: String?) {
     val all by viewModel.messages.collectAsState()
     val photoDeliveredIds by viewModel.photoDeliveredIds.collectAsState()
+    // FIX6 mark: which Missing cases already have a found report
+    // stored on this phone (own or relayed) — same local linkage as
+    // the Found picker's cap.
+    val foundUpdates by viewModel.messagesOfType("PERSON_FOUND_UPDATE").collectAsState()
+    val foundLinkedIds = remember(foundUpdates) { FoundLinkage.linkedCaseIds(foundUpdates) }
     var filter by remember { mutableStateOf(RecordFilter.ALL) }
     var expandedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showChooser by remember { mutableStateOf(false) }
@@ -291,6 +297,8 @@ private fun RecordsList(viewModel: AppViewModel, status: String?) {
                     record = record,
                     expanded = record.messageId in expandedIds,
                     photoDelivered = record.messageId in photoDeliveredIds,
+                    foundLinked = record.eventType == "MISSING_PERSON" &&
+                        record.messageId in foundLinkedIds,
                     onToggle = {
                         expandedIds = if (record.messageId in expandedIds) {
                             expandedIds - record.messageId
@@ -387,7 +395,8 @@ private fun RecordCard(
     record: MessageEntity,
     expanded: Boolean,
     photoDelivered: Boolean,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    foundLinked: Boolean = false
 ) {
     val hasPhotoSection = record.eventType == "MISSING_PERSON" ||
         record.eventType == "PERSON_FOUND_UPDATE"
@@ -447,6 +456,28 @@ private fun RecordCard(
                                 color = RescueColors.Muted
                             )
                         )
+                        // FIX6 mark: this Missing case already has a
+                        // found report stored on this phone. Same mint
+                        // pill style as the photo proof, right under
+                        // the status line — list and expanded view.
+                        if (foundLinked) {
+                            Surface(
+                                shape = RoundedCornerShape(9.dp),
+                                color = RescueColors.MintTint,
+                                modifier = Modifier.padding(top = 5.dp)
+                            ) {
+                                Text(
+                                    "Found reported",
+                                    style = TextStyle(
+                                        fontFamily = ManropeFamily,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF0B6B4F)
+                                    ),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
                     }
                     if (expanded) {
                         Icon(
@@ -1176,11 +1207,58 @@ private fun MissingFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
 }
 
 @Composable
+/**
+ * One case row in the Found picker's lists (FIX6): radio + summary +
+ * id/time line. The same row is used for the main list and for the
+ * collapsed already-reported section — only the tap behaviour differs
+ * (direct select vs. confirmation first).
+ */
+@Composable
+private fun FoundCaseRow(record: MessageEntity, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxWidth().rmSurface()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = selected,
+                onClick = onClick
+            )
+            Column(Modifier.padding(8.dp)) {
+                Text(
+                    summaryFor(record),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    "${record.messageId.take(13)}… · ${listTimeFormat.format(Date(record.createdAt))}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RescueColors.Muted
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val missing by viewModel.messagesOfType("MISSING_PERSON").collectAsState()
+    // FIX6 cap (LOCAL only — the phone cannot know the dashboard's
+    // review state offline): a case is found-linked when Room holds a
+    // PERSON_FOUND_UPDATE pointing at it, own or relayed. Linked
+    // cases leave the main list; the collapsed section below is the
+    // only way back in, with a confirmation first.
+    val foundUpdates by viewModel.messagesOfType("PERSON_FOUND_UPDATE").collectAsState()
+    val linkedIds = remember(foundUpdates) { FoundLinkage.linkedCaseIds(foundUpdates) }
+    val split = remember(missing, linkedIds) { FoundLinkage.split(missing, linkedIds) }
+    // These two mirror FoundPickerState (domain) — the rule is tested
+    // there; this screen only renders it with Compose state.
     var selectedCaseId by remember { mutableStateOf<String?>(null) }
+    var pendingCaseId by remember { mutableStateOf<String?>(null) }
+    var showReported by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
     var location by remember { mutableStateOf<PayloadLocation?>(null) }
     var photoThumb by remember { mutableStateOf<String?>(null) }
@@ -1212,32 +1290,78 @@ private fun FoundFormScreen(viewModel: AppViewModel, onCreated: () -> Unit) {
         Kicker("Which missing-person case is this about?")
         if (missing.isEmpty()) {
             Text("No missing-person records are stored on this phone yet — a found update needs one to point at.")
+        } else if (split.main.isEmpty()) {
+            Text("Every stored case already has a found report — to send another one on purpose, open the section below.")
         }
-        missing.forEach { record ->
+        split.main.forEach { record ->
+            FoundCaseRow(
+                record,
+                selected = selectedCaseId == record.messageId
+            ) {
+                selectedCaseId = record.messageId
+                pendingCaseId = null
+            }
+        }
+        // FIX6 override path: collapsed by default. Choosing a case
+        // here does NOT select it — it stages the confirmation below.
+        if (split.alreadyReported.isNotEmpty()) {
             Box(
                 modifier = Modifier.fillMaxWidth().rmSurface()
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = selectedCaseId == record.messageId,
-                        onClick = { selectedCaseId = record.messageId }
-                    )
-                    Column(Modifier.padding(8.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { showReported = !showReported }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            summaryFor(record),
+                            "Pehle hi found report gayi hui (${split.alreadyReported.size})",
                             style = MaterialTheme.typography.titleMedium
                         )
+                        Spacer(Modifier.weight(1f))
+                        Icon(
+                            if (showReported) Icons.Filled.KeyboardArrowDown else Icons.Filled.ChevronRight,
+                            contentDescription = if (showReported) "Collapse" else "Expand"
+                        )
+                    }
+                    if (showReported) {
                         Text(
-                            "${record.messageId.take(13)}… · ${listTimeFormat.format(Date(record.createdAt))}",
+                            "Dobara report sirf jaan-bujh kar — case chunne par pehle confirmation aayegi.",
                             style = MaterialTheme.typography.bodySmall,
                             color = RescueColors.Muted
                         )
+                        split.alreadyReported.forEach { record ->
+                            FoundCaseRow(
+                                record,
+                                selected = selectedCaseId == record.messageId
+                            ) {
+                                pendingCaseId = record.messageId
+                            }
+                        }
                     }
                 }
             }
+        }
+        // FIX6 confirmation: a linked case opens the form only after
+        // the user says Haan here; Nahi (or dismiss) leaves the
+        // previous selection untouched.
+        pendingCaseId?.let { caseId ->
+            AlertDialog(
+                onDismissRequest = { pendingCaseId = null },
+                title = { Text("Dobara found report?") },
+                text = { Text("Is case ke liye pehle hi ek found report ja chuki hai. Ek aur report bhejni hai?") },
+                confirmButton = {
+                    TextButton(onClick = { selectedCaseId = caseId; pendingCaseId = null }) {
+                        Text("Haan")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingCaseId = null }) {
+                        Text("Nahi")
+                    }
+                }
+            )
         }
         RmTextField(
             value = note,

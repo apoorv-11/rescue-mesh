@@ -746,6 +746,26 @@ function Dashboard({
     [messages],
   );
 
+  /* Every found report per case, newest first. The server's case view
+   * links only the newest found update (foundMessageId); the rest are
+   * still stored messages — the case card shows them all in a strip so
+   * a second person's report is never silently displaced. */
+  const foundReportsByCase = useMemo(() => {
+    const map = new Map<string, MessageDto[]>();
+    for (const m of messages) {
+      if (m.eventType !== "PERSON_FOUND_UPDATE") continue;
+      const caseId = payloadStr(m.payload, "caseId");
+      if (!caseId) continue;
+      const arr = map.get(caseId) ?? [];
+      arr.push(m);
+      map.set(caseId, arr);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => b.createdAt - a.createdAt);
+    }
+    return map;
+  }, [messages]);
+
   const queueRows = useMemo<QueueRow[]>(() => {
     const rows = messages
       .map((m) => {
@@ -1336,6 +1356,9 @@ function Dashboard({
                     busy={reviewBusy[caseKey] ?? false}
                     error={reviewError[caseKey]}
                     foundMsg={c.foundMessageId ? msgById.get(c.foundMessageId) : undefined}
+                    foundReports={
+                      c.messageId ? (foundReportsByCase.get(c.messageId) ?? []) : []
+                    }
                     onReview={doReview}
                   />
                 );
@@ -1656,6 +1679,7 @@ function CaseCard({
   busy,
   error,
   foundMsg,
+  foundReports,
   onReview,
 }: {
   c: MissingCaseDto;
@@ -1666,6 +1690,9 @@ function CaseCard({
   busy: boolean;
   error: string | undefined;
   foundMsg: MessageDto | undefined;
+  /* All found reports linked to this case, newest first (the server's
+   * foundMessageId is the newest of these). */
+  foundReports: MessageDto[];
   onReview: (c: MissingCaseDto, act: "confirm" | "reject") => void;
 }) {
   /* Case status (c.status: OPEN | FOUND_REPORTED) and the coordinator
@@ -1771,6 +1798,25 @@ function CaseCard({
             Advisory only — the case is never closed by a score; the
             coordinator decides.
           </p>
+        </div>
+      )}
+      {foundReports.length > 1 && (
+        <div className="found-strip">
+          <div className="found-strip-head">
+            Found reports — {foundReports.length} received · newest first (the
+            pair above and the face match use the newest)
+          </div>
+          <div className="found-strip-grid">
+            {foundReports.map((m) => (
+              <PhotoSlot
+                key={m.messageId}
+                messageId={m.payload["photoRef"] ? m.messageId : null}
+                token={token}
+                caption={`Found · ${ageLabel(Date.now() - m.createdAt)}`}
+                emptyText="No photo with this report"
+              />
+            ))}
+          </div>
         </div>
       )}
       <div className="case-body">
