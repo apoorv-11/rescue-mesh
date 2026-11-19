@@ -109,6 +109,18 @@ export interface AnnouncementDto {
 
 export type Payload = Record<string, unknown>;
 
+/* One hop-trace entry, as stored and signed by the device that made
+ * it. `loc` is the optional "<lat>,<lon>" (3-dp string) that device
+ * embedded — the basis for the dashboard's trail + heat views. */
+export interface HopEntryDto {
+  i: number;
+  role: string; // ORIGIN | RELAY | GATEWAY
+  deviceId: string;
+  at: number;
+  loc?: string;
+  net?: string; // WIFI | CELLULAR (gateway entries)
+}
+
 export interface MessageDto {
   messageId: string;
   eventType: string; // SOS | SAFETY_CHECKIN | MISSING_PERSON | PERSON_FOUND_UPDATE | ANNOUNCEMENT | RESOURCE_UPDATE
@@ -118,7 +130,7 @@ export interface MessageDto {
   priority: number; // 1 Critical | 2 High | 3 Normal (rule-based; ML service not built yet)
   hopLimit: number;
   hopCount: number;
-  hopTrace: unknown;
+  hopTrace: HopEntryDto[];
   payload: Payload;
   signature: string;
 }

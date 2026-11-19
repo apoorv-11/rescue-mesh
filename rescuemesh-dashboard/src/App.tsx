@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
+import "leaflet.heat";
 import {
   API_BASE,
   ApiError,
@@ -122,15 +123,52 @@ function payloadStr(p: Record<string, unknown>, key: string): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
 
+/* Pin / trail colours per record type — shared by the pins view and
+ * the trails view so a type means the same colour in both. */
+const PIN_COLORS: Record<string, string> = {
+  SOS: "#d92d20",
+  SAFETY_CHECKIN: "#12805c",
+  MISSING_PERSON: "#b54708",
+  PERSON_FOUND_UPDATE: "#7a5af8",
+  RESOURCE_UPDATE: "#1d6fd1",
+  ANNOUNCEMENT: "#667085",
+};
+
+/* A hop entry's `loc` is the string "<lat>,<lon>" (3 dp) the device
+ * embedded when it handled the record. Parse it, or null. */
+function parseHopLoc(loc: string | undefined): { lat: number; lng: number } | null {
+  if (!loc) return null;
+  const parts = loc.split(",");
+  if (parts.length !== 2) return null;
+  const lat = Number(parts[0]);
+  const lng = Number(parts[1]);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
 function payloadLocation(
   p: Record<string, unknown>,
 ): { lat: number; lng: number } | null {
   const loc = p.location;
   if (loc && typeof loc === "object") {
     const rec = loc as Record<string, unknown>;
-    const lat = typeof rec.lat === "number" ? rec.lat : null;
-    const lon = typeof rec.lon === "number" ? rec.lon : null;
-    if (lat !== null && lon !== null) return { lat, lng: lon };
+    /* The Android build sends lat/lon as 3-dp STRINGS ("28.613") —
+     * accept strings as well as numbers, or those records never get
+     * a map pin. */
+    const lat =
+      typeof rec.lat === "number"
+        ? rec.lat
+        : typeof rec.lat === "string"
+          ? Number(rec.lat)
+          : null;
+    const lon =
+      typeof rec.lon === "number"
+        ? rec.lon
+        : typeof rec.lon === "string"
+          ? Number(rec.lon)
+          : null;
+    if (lat !== null && lon !== null && Number.isFinite(lat) && Number.isFinite(lon)) {
+      return { lat, lng: lon };
+    }
   }
   return null;
 }
@@ -375,6 +413,16 @@ interface Pin {
   lat: number;
   lng: number;
   color: string;
+  title: string;
+  text: string;
+}
+
+/* One record's located path for the trails view: origin location
+ * followed by each hop's embedded location, in order. */
+interface Trail {
+  key: string;
+  color: string;
+  points: { lat: number; lng: number }[];
   title: string;
   text: string;
 }
@@ -846,34 +894,90 @@ function Dashboard({
   }, [queueRows, fType, fPri, fSearch]);
 
   const pins = useMemo<Pin[]>(() => {
+    /* Every record that carries a location gets a pin, coloured by
+     * type: SOS (from the server's extracted coordinates, falling
+     * back to the payload), I Am Safe check-ins, Missing, Found
+     * updates, Resources, Announcements. Records without a location
+     * in the payload simply have no pin — nothing is invented. */
     const out: Pin[] = [];
+    const pinnedSos = new Set<string>();
     for (const s of sos) {
       if (s.latitude !== null && s.longitude !== null) {
+        pinnedSos.add(s.messageId);
         out.push({
           key: `sos-${s.messageId}`,
           lat: s.latitude,
           lng: s.longitude,
-          color: "#d92d20",
+          color: PIN_COLORS.SOS,
           title: "SOS",
           text: s.note ?? "SOS record",
         });
       }
     }
     for (const m of messages) {
-      if (m.eventType === "SOS") continue; // already pinned from /records/sos
+      if (m.eventType === "SOS" && pinnedSos.has(m.messageId)) continue;
       const loc = payloadLocation(m.payload);
       if (!loc) continue;
       out.push({
         key: `msg-${m.messageId}`,
         lat: loc.lat,
         lng: loc.lng,
-        color: m.eventType === "MISSING_PERSON" ? "#b54708" : "#1d6fd1",
+        color: PIN_COLORS[m.eventType] ?? "#1d6fd1",
         title: typeLabel(m.eventType),
         text: payloadText(m),
       });
     }
     return out;
   }, [sos, messages]);
+
+  const [mapMode, setMapMode] = useState<"pins" | "trails">("pins");
+
+  /* Hop trails: for each recent record, the path its locations make —
+   * the origin's payload location followed by every hop entry's
+   * embedded `loc`, in order. Only records with at least two located
+   * points can draw a trail; capped at the 12 most recent. */
+  const trails = useMemo(() => {
+    const out: Trail[] = [];
+    for (const m of messages) {
+      const pts: { lat: number; lng: number }[] = [];
+      const push = (p: { lat: number; lng: number } | null) => {
+        if (!p) return;
+        const last = pts[pts.length - 1];
+        if (!last || last.lat !== p.lat || last.lng !== p.lng) pts.push(p);
+      };
+      push(payloadLocation(m.payload));
+      if (Array.isArray(m.hopTrace)) {
+        for (const h of m.hopTrace) push(parseHopLoc(h.loc));
+      }
+      if (pts.length < 2) continue;
+      out.push({
+        key: `trail-${m.messageId}`,
+        color: PIN_COLORS[m.eventType] ?? "#1d6fd1",
+        points: pts,
+        title: typeLabel(m.eventType),
+        text: `${deviceLabel(m.originDeviceId)} · ${m.hopCount} hops · ${ageLabel(Date.now() - m.createdAt)}`,
+      });
+      if (out.length >= 12) break;
+    }
+    return out;
+  }, [messages]);
+
+  /* Heat points: every location that arrived with a record — payload
+   * locations plus every hop entry's embedded location. */
+  const heatPoints = useMemo<[number, number, number][]>(() => {
+    const pts: [number, number, number][] = [];
+    for (const m of messages) {
+      const loc = payloadLocation(m.payload);
+      if (loc) pts.push([loc.lat, loc.lng, 1]);
+      if (Array.isArray(m.hopTrace)) {
+        for (const h of m.hopTrace) {
+          const p = parseHopLoc(h.loc);
+          if (p) pts.push([p.lat, p.lng, 1]);
+        }
+      }
+    }
+    return pts;
+  }, [messages]);
 
   const kpis = useMemo(() => {
     const now = Date.now();
@@ -1172,14 +1276,45 @@ function Dashboard({
           <div className="card">
             <div className="card-head">
               <h2>Incident map</h2>
-              <span className="sub">SOS · Missing · Resources</span>
+              <span className="sub">Every record with a location</span>
               <div className="right legend">
                 <span><i style={{ background: "var(--red)" }}></i>SOS</span>
+                <span><i style={{ background: "#12805c" }}></i>I Am Safe</span>
                 <span><i style={{ background: "var(--amber)" }}></i>Missing</span>
+                <span><i style={{ background: "#7a5af8" }}></i>Found</span>
                 <span><i style={{ background: "var(--accent)" }}></i>Resource</span>
               </div>
             </div>
-            <IncidentMap pins={pins} />
+            <div style={{ padding: "0 16px 10px" }}>
+              <div className="seg" role="group" aria-label="Map view">
+                <button
+                  aria-pressed={mapMode === "pins"}
+                  onClick={() => setMapMode("pins")}
+                >
+                  Pins
+                </button>
+                <button
+                  aria-pressed={mapMode === "trails"}
+                  onClick={() => setMapMode("trails")}
+                >
+                  Hop trails + heat
+                </button>
+              </div>
+            </div>
+            <IncidentMap
+              pins={pins}
+              mode={mapMode}
+              trails={trails}
+              heatPoints={heatPoints}
+            />
+            {mapMode === "trails" && trails.length === 0 && (
+              <p className="review-note" style={{ padding: "10px 16px" }}>
+                No hop-trail locations yet — trails appear once phones embed
+                their location in hop entries (Android location update). The
+                heat layer is built only from locations that arrived with
+                records ({heatPoints.length} point{heatPoints.length === 1 ? "" : "s"} so far).
+              </p>
+            )}
           </div>
 
           <div className="card feed">
@@ -1557,7 +1692,52 @@ function FitPins({ pins }: { pins: Pin[] }) {
   return null;
 }
 
-function IncidentMap({ pins }: { pins: Pin[] }) {
+/* leaflet.heat layer (L.heatLayer, added by the plugin import).
+ * Rebuilt whenever the point set changes; removed on cleanup. */
+function HeatLayer({ points }: { points: [number, number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (points.length === 0) return;
+    const heat = (
+      L as unknown as {
+        heatLayer: (
+          pts: [number, number, number][],
+          opts?: Record<string, unknown>,
+        ) => L.Layer;
+      }
+    ).heatLayer(points, { radius: 28, blur: 18, minOpacity: 0.35 });
+    heat.addTo(map);
+    return () => {
+      map.removeLayer(heat);
+    };
+  }, [map, points]);
+  return null;
+}
+
+function IncidentMap({
+  pins,
+  mode,
+  trails,
+  heatPoints,
+}: {
+  pins: Pin[];
+  mode: "pins" | "trails";
+  trails: Trail[];
+  heatPoints: [number, number, number][];
+}) {
+  const fitPoints: Pin[] =
+    mode === "pins"
+      ? pins
+      : trails.flatMap((t) =>
+          t.points.map((p, idx) => ({
+            key: `${t.key}-fit-${idx}`,
+            lat: p.lat,
+            lng: p.lng,
+            color: t.color,
+            title: t.title,
+            text: t.text,
+          })),
+        );
   return (
     <MapContainer id="map" center={CENTER} zoom={12} scrollWheelZoom>
       <TileLayer
@@ -1565,21 +1745,54 @@ function IncidentMap({ pins }: { pins: Pin[] }) {
         maxZoom={18}
         attribution="&copy; OpenStreetMap contributors"
       />
-      <FitPins pins={pins} />
-      {pins.map((p) => (
-        <CircleMarker
-          key={p.key}
-          center={[p.lat, p.lng]}
-          radius={8}
-          pathOptions={{ color: "#fff", weight: 2, fillColor: p.color, fillOpacity: 0.95 }}
-        >
-          <Popup>
-            <b>{p.title}</b>
-            <br />
-            {p.text}
-          </Popup>
-        </CircleMarker>
-      ))}
+      <FitPins pins={fitPoints} />
+      {mode === "pins" &&
+        pins.map((p) => (
+          <CircleMarker
+            key={p.key}
+            center={[p.lat, p.lng]}
+            radius={8}
+            pathOptions={{ color: "#fff", weight: 2, fillColor: p.color, fillOpacity: 0.95 }}
+          >
+            <Popup>
+              <b>{p.title}</b>
+              <br />
+              {p.text}
+            </Popup>
+          </CircleMarker>
+        ))}
+      {mode === "trails" && (
+        <>
+          <HeatLayer points={heatPoints} />
+          {trails.map((t) => (
+            <Fragment key={t.key}>
+              <Polyline
+                positions={t.points.map((p) => [p.lat, p.lng] as [number, number])}
+                pathOptions={{ color: t.color, weight: 3, opacity: 0.85 }}
+              >
+                <Popup>
+                  <b>{t.title}</b>
+                  <br />
+                  {t.text}
+                </Popup>
+              </Polyline>
+              {t.points.map((p, idx) => (
+                <CircleMarker
+                  key={idx}
+                  center={[p.lat, p.lng]}
+                  radius={idx === 0 ? 6 : 4}
+                  pathOptions={{
+                    color: "#fff",
+                    weight: 1.5,
+                    fillColor: t.color,
+                    fillOpacity: 0.95,
+                  }}
+                />
+              ))}
+            </Fragment>
+          ))}
+        </>
+      )}
     </MapContainer>
   );
 }
