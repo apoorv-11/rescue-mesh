@@ -888,8 +888,32 @@ function Dashboard({
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const syncedToday = messages.filter((m) => m.createdAt >= startOfToday.getTime()).length;
-    return { activeSos: activeSosRecs.length, p1, openCases: cases.length, safe24h, syncedToday };
-  }, [sos, cases, messages]);
+    /* Missing cases split by coordinator review: a case CONFIRMED found
+     * is closed work — it leaves the "still open" headline number and
+     * shows in its own confirmed count instead. REJECTED found reports
+     * keep the case in the open number (the person is still missing). */
+    let confirmedFound = 0;
+    let awaitingReview = 0;
+    for (const c of cases) {
+      const key = c.messageId ?? `case-${c.id}`;
+      const rs = review[key] ?? c.reviewStatus;
+      if (rs === "CONFIRMED") confirmedFound++;
+      /* "Awaiting" means a found report arrived and NO decision exists
+       * yet — a REJECTED case is not awaiting anything, it is simply
+       * open again (it stays in the headline number only). */
+      else if (c.status === "FOUND_REPORTED" && !rs) awaitingReview++;
+    }
+    const openCases = cases.length - confirmedFound;
+    return {
+      activeSos: activeSosRecs.length,
+      p1,
+      openCases,
+      confirmedFound,
+      awaitingReview,
+      safe24h,
+      syncedToday,
+    };
+  }, [sos, cases, messages, review]);
 
   const auditItems = useMemo(() => messages.slice(0, 6), [messages]);
 
@@ -1125,8 +1149,11 @@ function Dashboard({
           </div>
           <div className="card kpi">
             <div className="num">{kpis.openCases}</div>
-            <div className="lbl">Open missing cases</div>
-            <div className="delta">Found reports need coordinator review</div>
+            <div className="lbl">Missing cases still open</div>
+            <div className="delta">
+              {kpis.confirmedFound} confirmed found · {kpis.awaitingReview} awaiting
+              review
+            </div>
           </div>
           <div className="card kpi green">
             <div className="num">{kpis.safe24h}</div>
