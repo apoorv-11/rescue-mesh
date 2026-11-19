@@ -64,6 +64,9 @@ class GatewaySyncTest {
     private inner class FakeSyncApi : SyncApi {
         val batchCalls = mutableListOf<Pair<String, SyncBatchRequest>>()
         val deviceTokenCalls = mutableListOf<String>()
+        val photoCalls = mutableListOf<Triple<String, String, ByteArray>>()
+        var onPhoto: (String, String, ByteArray) -> ApiResult<Unit> =
+            { _, _, _ -> ApiResult.Success(Unit) }
         var onBatch: (SyncBatchRequest) -> ApiResult<SyncBatchResponse> = { request ->
             ApiResult.Success(
                 SyncBatchResponse(
@@ -97,6 +100,16 @@ class GatewaySyncTest {
         override suspend fun deviceToken(deviceId: String): ApiResult<TokenResponse> {
             deviceTokenCalls += deviceId
             return onDeviceToken(deviceId)
+        }
+
+        override suspend fun uploadPhoto(
+            authorization: String,
+            messageId: String,
+            sha256: String,
+            jpegBytes: ByteArray
+        ): ApiResult<Unit> {
+            photoCalls += Triple(authorization, messageId, jpegBytes)
+            return onPhoto(messageId, sha256, jpegBytes)
         }
     }
 

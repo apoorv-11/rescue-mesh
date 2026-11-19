@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rescuemesh.mesh.NearbyPermissions
 import com.rescuemesh.ui.AccountViewModel
 import com.rescuemesh.ui.AppViewModel
+import com.rescuemesh.ui.PrepareViewModel
 import com.rescuemesh.ui.RescueMeshRoot
 import com.rescuemesh.ui.RescueMeshTheme
 
@@ -63,9 +64,11 @@ class MainActivity : ComponentActivity() {
             RescueMeshTheme {
                 val appViewModel: AppViewModel = viewModel()
                 val accountViewModel: AccountViewModel = viewModel()
+                val prepareViewModel: PrepareViewModel = viewModel()
                 RescueMeshRoot(
                     viewModel = appViewModel,
                     accountViewModel = accountViewModel,
+                    prepareViewModel = prepareViewModel,
                     onRequestPermissions = {
                         permissionLauncher.launch(NearbyPermissions.requiredRuntimePermissions())
                     }

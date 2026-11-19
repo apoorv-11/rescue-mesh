@@ -4,18 +4,32 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * Where the optional account layer points: the server's base URL, kept in a
- * plain app-private SharedPreferences file — configuration, not app data,
- * so deliberately NOT in Room. Unset (the default) means "not configured":
- * the account layer stays inert and the rest of the app is unaffected.
+ * Where the account / gateway layer points: the server's base URL, kept in
+ * a plain app-private SharedPreferences file — configuration, not app data,
+ * so deliberately NOT in Room.
+ *
+ * FIX5 (19 Nov 2026): a fresh install has NO saved URL, and a new user
+ * must never have to type one — so when nothing is saved, [baseUrl]
+ * returns the public Render default ([DEFAULT_BASE_URL]) instead of
+ * null. The URL field stays editable: saving any URL overrides the
+ * default, and [clearCustomUrl] goes back to it. Nothing else changes:
+ * SOS, mesh and sync never consult the account layer, and sync still
+ * works without login (device-token fallback in GatewaySync).
  */
 class ServerConfig(context: Context) {
 
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(PREF_FILE_NAME, Context.MODE_PRIVATE)
 
-    /** The saved, normalized base URL (no trailing slash), or null when none was saved. */
-    fun baseUrl(): String? = prefs.getString(KEY_BASE_URL, null)?.takeIf { it.isNotBlank() }
+    /**
+     * The effective base URL (no trailing slash): the saved custom URL
+     * when one exists, otherwise the Render default. Never null.
+     */
+    fun baseUrl(): String = effectiveBaseUrl(prefs.getString(KEY_BASE_URL, null))
+
+    /** True when no custom URL is saved, i.e. the Render default is in use. */
+    fun isUsingDefault(): Boolean =
+        prefs.getString(KEY_BASE_URL, null).isNullOrBlank()
 
     /**
      * Normalizes and saves [raw]. Returns the normalized URL on success, or
@@ -27,9 +41,31 @@ class ServerConfig(context: Context) {
         return normalized
     }
 
+    /** Forgets a saved custom URL; the Render default applies again. */
+    fun clearCustomUrl() {
+        prefs.edit().remove(KEY_BASE_URL).apply()
+    }
+
     companion object {
         const val PREF_FILE_NAME = "rescuemesh_server_config"
         private const val KEY_BASE_URL = "baseUrl"
+
+        /**
+         * FIX5 default — the public Render deployment, verified live
+         * 19 Nov 2026: GET /health returns {"status":"UP"} and
+         * GET /sync/pubkey returns a fixed (non-ephemeral) keyId.
+         * This is the ONLY place the default lives; never hard-code
+         * the URL anywhere else.
+         */
+        const val DEFAULT_BASE_URL = "https://rescue-mesh-m0n0.onrender.com"
+
+        /**
+         * Pure effective-URL rule, unit-tested: a saved (already
+         * normalized) URL wins; blank / absent falls back to the
+         * Render default. Never returns null.
+         */
+        fun effectiveBaseUrl(saved: String?): String =
+            saved?.takeIf { it.isNotBlank() } ?: DEFAULT_BASE_URL
 
         /**
          * Normalizes a user-typed server URL: trims whitespace, strips

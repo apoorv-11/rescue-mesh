@@ -25,6 +25,13 @@ interface SyncApi {
     suspend fun syncPubkey(): ApiResult<SyncPubkeyResponse>
     suspend fun syncBatch(authorization: String, request: SyncBatchRequest): ApiResult<SyncBatchResponse>
     suspend fun deviceToken(deviceId: String): ApiResult<TokenResponse>
+    /** FIX5 photo upload: POST /sync/photo (multipart). See [ApiClient.uploadPhoto]. */
+    suspend fun uploadPhoto(
+        authorization: String,
+        messageId: String,
+        sha256: String,
+        jpegBytes: ByteArray
+    ): ApiResult<Unit>
 }
 
 /** Production [SyncApi]: a thin delegation to the shared [ApiClient]. */
@@ -37,6 +44,13 @@ class ApiClientSyncApi(private val client: ApiClient) : SyncApi {
 
     override suspend fun deviceToken(deviceId: String): ApiResult<TokenResponse> =
         client.deviceToken(deviceId)
+
+    override suspend fun uploadPhoto(
+        authorization: String,
+        messageId: String,
+        sha256: String,
+        jpegBytes: ByteArray
+    ): ApiResult<Unit> = client.uploadPhoto(authorization, messageId, sha256, jpegBytes)
 }
 
 /** Builds the wire envelope for one stored record: hopTrace/payload as parsed JSON values. */
@@ -86,7 +100,13 @@ class GatewaySync(
     private val internetChecker: InternetChecker,
     /** "WIFI" / "CELLULAR" of the active network, or null — GATEWAY entries only. */
     private val networkTypeProvider: () -> String? = { null },
-    private val nowMs: () -> Long = { System.currentTimeMillis() }
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    /**
+     * FIX5 photo phase (null in old tests / when photos are disabled):
+     * runs AFTER the record batches, never before, and never changes a
+     * record's state. See [PhotoSync].
+     */
+    private val photoSync: PhotoSync? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val ownPublicKeyB64: String = DeviceIds.base64UrlEncode(ownPublicKey)
@@ -242,13 +262,34 @@ class GatewaySync(
             }
         }
 
+        // FIX5 photo phase: record batch is DONE before any photo is
+        // attempted. Any failure here is swallowed into the photo line
+        // only — it can never change the record outcome above, and a
+        // photo that fails stays queued for the next run.
+        // NOTE (compile fix, 19 Nov): Kotlin does NOT smart-cast a
+        // nullable member property (or a `var`) inside a lambda, so
+        // the null-check above does not carry into runCatching's
+        // block — capture both into local non-null vals first.
+        var photoLine = ""
+        val photoSyncLocal = photoSync
+        val authToken = token
+        if (photoSyncLocal != null && authToken != null) {
+            val photo = runCatching {
+                photoSyncLocal.uploadPendingPhotos("Bearer $authToken")
+            }.getOrNull()
+            if (photo != null && photo.hasActivity) {
+                photoLine = " Photos: ${photo.uploaded} uploaded, ${photo.failed} failed (will retry)" +
+                    if (photo.unsupported > 0) ", server photo upload not supported yet." else "."
+            }
+        }
+
         val summary = if (uploaded == 0 && attemptedThisRun.isEmpty()) {
             "Nothing to sync — no stored records are waiting for the server."
         } else {
             "Synced: $accepted new, $alreadyExists already on server, " +
                 "$rejected rejected, ack unverified for $unverified records."
         }
-        return finish(summary, runStartedAt, success = true, countsSummary = summary)
+        return finish(summary + photoLine, runStartedAt, success = true, countsSummary = summary + photoLine)
     }
 
     /**

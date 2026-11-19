@@ -20,13 +20,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * - v3 (photo delivery, 14 Nov): adds `photo_delivery` (one receipt per
  *   record+peer whose PHOTO_ACK COMPLETE confirmed a full-photo
  *   delivery) via [MIGRATION_2_3].
+ * - v4 (FIX5 + Prepare, 19 Nov): adds `photo_upload` (one receipt per
+ *   record whose full photo the server accepted) and `saved_guides`
+ *   (Prepare guides the user marked Saved) via [MIGRATION_3_4].
  */
 @Database(
     entities = [
         ProfileEntity::class, MessageEntity::class, PeerEntity::class,
-        MetricsEntity::class, ServerAckEntity::class, PhotoDeliveryEntity::class
+        MetricsEntity::class, ServerAckEntity::class, PhotoDeliveryEntity::class,
+        PhotoUploadEntity::class, SavedGuideEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class RescueMeshDatabase : RoomDatabase() {
@@ -36,6 +40,8 @@ abstract class RescueMeshDatabase : RoomDatabase() {
     abstract fun metricsDao(): MetricsDao
     abstract fun serverAckDao(): ServerAckDao
     abstract fun photoDeliveryDao(): PhotoDeliveryDao
+    abstract fun photoUploadDao(): PhotoUploadDao
+    abstract fun savedGuideDao(): SavedGuideDao
 
     companion object {
         const val DATABASE_NAME = "rescuemesh.db"
@@ -79,9 +85,29 @@ abstract class RescueMeshDatabase : RoomDatabase() {
             }
         }
 
+        /** The v4 CREATE TABLEs, kept as named constants so the migration and its JVM check share one source of truth. */
+        const val PHOTO_UPLOAD_CREATE_SQL: String =
+            "CREATE TABLE IF NOT EXISTS `photo_upload` (" +
+                "`messageId` TEXT NOT NULL, " +
+                "`uploadedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`messageId`))"
+        const val SAVED_GUIDES_CREATE_SQL: String =
+            "CREATE TABLE IF NOT EXISTS `saved_guides` (" +
+                "`guideId` TEXT NOT NULL, " +
+                "`savedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`guideId`))"
+
+        /** v3 → v4: CREATE TABLE for `photo_upload` and `saved_guides`. */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(PHOTO_UPLOAD_CREATE_SQL)
+                db.execSQL(SAVED_GUIDES_CREATE_SQL)
+            }
+        }
+
         fun create(context: Context): RescueMeshDatabase =
             Room.databaseBuilder(context.applicationContext, RescueMeshDatabase::class.java, DATABASE_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

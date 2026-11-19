@@ -75,6 +75,23 @@ class AppNavTest {
     }
 
     @Test
+    fun `Prepare hub pushes over Home without touching the bottom bar`() {
+        var state = NavState(tab = AppTab.HOME)
+        state = AppNav.push(state, SubScreen.PrepareList)
+        assertEquals(SubScreen.PrepareList, state.current)
+        assertEquals(AppTab.HOME, state.tab)
+        state = AppNav.push(state, SubScreen.PrepareDetail("first-aid"))
+        assertEquals(SubScreen.PrepareDetail("first-aid"), state.current)
+        state = AppNav.pop(state)
+        assertEquals(SubScreen.PrepareList, state.current)
+        state = AppNav.pop(state)
+        assertTrue(state.atTabRoot)
+        assertEquals(AppTab.HOME, state.tab)
+        // And the tab set itself never gained a Prepare tab.
+        assertEquals(listOf(AppTab.HOME, AppTab.RECORDS, AppTab.MESH, AppTab.ACCOUNT), AppTab.values().toList())
+    }
+
+    @Test
     fun `popToRoot clears only the selected tab`() {
         var state = NavState()
         state = AppNav.push(state, SubScreen.Account(AccountPage.LOGIN))

@@ -6,14 +6,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
 
 /** Retrofit service for the account endpoints. Paths are relative to the configured base URL. */
 interface RescueMeshService {
@@ -73,6 +78,26 @@ interface RescueMeshService {
         @Header("Authorization") authorization: String,
         @Body body: SyncBatchRequest
     ): Response<SyncBatchResponse>
+
+    /**
+     * Photo upload (FIX5): one record's full photo, AFTER its record
+     * reached the server. Multipart so the JPEG bytes never enter the
+     * signed envelope (the envelope contract is frozen). Contract the
+     * server must implement: `POST /sync/photo`, Bearer auth (user or
+     * device token, same as /sync/batch), fields `messageId` (text),
+     * `sha256` (text, the signed photoRef digest) and `photo` (the
+     * JPEG file, `<messageId>.jpg`). 2xx = stored. Until the server
+     * implements it, expect 404/405 — the client treats that as
+     * "not supported yet", never as a record-sync failure.
+     */
+    @Multipart
+    @POST("sync/photo")
+    suspend fun uploadPhoto(
+        @Header("Authorization") authorization: String,
+        @Part("messageId") messageId: okhttp3.RequestBody,
+        @Part("sha256") sha256: okhttp3.RequestBody,
+        @Part photo: MultipartBody.Part
+    ): Response<ResponseBody>
 }
 
 /**
@@ -157,8 +182,53 @@ class ApiClient(
     suspend fun syncBatch(authorization: String, request: SyncBatchRequest): ApiResult<SyncBatchResponse> =
         call { it.syncBatch(authorization, request) }
 
+    /**
+     * Uploads one full photo (FIX5, see [RescueMeshService.uploadPhoto]).
+     * The raw [ResponseBody] is never parsed — only the status matters.
+     */
+    suspend fun uploadPhoto(
+        authorization: String,
+        messageId: String,
+        sha256: String,
+        jpegBytes: ByteArray
+    ): ApiResult<Unit> {
+        val service = serviceOrNull()
+            ?: return ApiResult.Unreachable(
+                "No server URL saved — save one on the Account screen first."
+            )
+        return withContext(Dispatchers.IO) {
+            try {
+                val textType = "text/plain".toMediaType()
+                val response = service.uploadPhoto(
+                    authorization,
+                    messageId.toRequestBody(textType),
+                    sha256.toRequestBody(textType),
+                    MultipartBody.Part.createFormData(
+                        "photo",
+                        "$messageId.jpg",
+                        jpegBytes.toRequestBody("image/jpeg".toMediaType())
+                    )
+                )
+                if (response.isSuccessful) {
+                    ApiResult.Success(Unit)
+                } else {
+                    val message = parseServerError(response.errorBody()?.string())
+                        ?: "HTTP ${response.code()}"
+                    ApiResult.HttpError(response.code(), message)
+                }
+            } catch (e: IOException) {
+                ApiResult.Unreachable(
+                    "Server unreachable — check the URL, that this phone is on the " +
+                        "same network (LAN server), and that the server is running."
+                )
+            }
+        }
+    }
+
     private fun serviceOrNull(): RescueMeshService? {
-        val baseUrl = serverConfig.baseUrl() ?: return null
+        // FIX5: baseUrl() never returns null now (Render default when
+        // nothing is saved), so the service always builds.
+        val baseUrl = serverConfig.baseUrl()
         return Retrofit.Builder()
             .baseUrl("$baseUrl/")
             .client(httpClient)

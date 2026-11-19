@@ -113,6 +113,8 @@ private val hourMinuteFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 private fun navTitle(nav: NavState): String = when (val current = nav.current) {
     is SubScreen.Form -> current.kind.title
     is SubScreen.Account -> current.page.title
+    is SubScreen.PrepareList -> "Prepare — offline guides"
+    is SubScreen.PrepareDetail -> "Prepare"
     null -> nav.tab.title
 }
 
@@ -127,6 +129,7 @@ private fun tabLabel(tab: AppTab): String = when (tab) {
 fun RescueMeshRoot(
     viewModel: AppViewModel,
     accountViewModel: AccountViewModel,
+    prepareViewModel: PrepareViewModel,
     onRequestPermissions: () -> Unit
 ) {
     val profile by viewModel.profile.collectAsState()
@@ -171,12 +174,34 @@ fun RescueMeshRoot(
         if (nav.current != null) {
             BackRow(title = navTitle(nav), onBack = { viewModel.popSubScreen() })
         }
+        // Hoisted above the branch: collectAsState must run on every
+        // composition, not only inside one `when` arm.
+        val prepareSavedIds by prepareViewModel.savedIds.collectAsState()
         Box(modifier = Modifier.weight(1f)) {
-            when (nav.tab) {
-                AppTab.HOME -> HomeScreen(viewModel, accountViewModel)
-                AppTab.RECORDS -> RecordsScreen(viewModel)
-                AppTab.MESH -> MeshScreen(viewModel, onRequestPermissions)
-                AppTab.ACCOUNT -> AccountTab(viewModel, accountViewModel)
+            // Prepare hub (Prompt 10): pushed over the Home tab from
+            // its card. It renders here, above the tab switch, so the
+            // bottom bar (4 tabs, unchanged) stays visible underneath
+            // and Back pops back to Home.
+            when (val current = nav.current) {
+                is SubScreen.PrepareList -> PrepareListScreen(viewModel, prepareViewModel)
+                is SubScreen.PrepareDetail -> {
+                    val guide = com.rescuemesh.domain.PrepareGuides.byId(current.guideId)
+                    if (guide != null) {
+                        PrepareDetailScreen(
+                            guide = guide,
+                            saved = guide.id in prepareSavedIds,
+                            onToggleSaved = { prepareViewModel.toggleSaved(guide.id) }
+                        )
+                    } else {
+                        PrepareListScreen(viewModel, prepareViewModel)
+                    }
+                }
+                else -> when (nav.tab) {
+                    AppTab.HOME -> HomeScreen(viewModel, accountViewModel)
+                    AppTab.RECORDS -> RecordsScreen(viewModel)
+                    AppTab.MESH -> MeshScreen(viewModel, onRequestPermissions)
+                    AppTab.ACCOUNT -> AccountTab(viewModel, accountViewModel)
+                }
             }
         }
         BottomBar(current = nav.tab, onSelect = { viewModel.selectTab(it) })
@@ -729,6 +754,33 @@ fun HomeScreen(viewModel: AppViewModel, accountViewModel: AccountViewModel) {
                 )
             }
         }
+        // Prepare hub (Prompt 10): the ONLY entry point. A card on
+        // Home that pushes the guide list — no 5th bottom-bar tab,
+        // no login, no network. The guides are bundled in the app.
+        item {
+            RmCard(onClick = { viewModel.pushSubScreen(SubScreen.PrepareList) }) {
+                Kicker("Prepare — offline guides")
+                Text(
+                    "Be ready before a disaster — flood, earthquake, cyclone, fire, landslide, first aid, go-bag and family plan.",
+                    style = TextStyle(
+                        fontFamily = ManropeFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.5.sp,
+                        lineHeight = 17.sp,
+                        color = RescueColors.Muted
+                    )
+                )
+                Text(
+                    "9 guides · Works in airplane mode ›",
+                    style = TextStyle(
+                        fontFamily = ManropeFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp,
+                        color = RescueColors.Ink
+                    )
+                )
+            }
+        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -851,6 +903,19 @@ private fun MiniRecordCard(
                         style = TextStyle(
                             fontFamily = ManropeFamily,
                             fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.sp,
+                            color = RescueColors.Muted
+                        )
+                    )
+                    // Prompt 10 Emergency screen (surfacing only): the
+                    // record's state in plain words, under its type
+                    // line. The states already exist — this only
+                    // translates them; nothing new is introduced.
+                    Text(
+                        com.rescuemesh.domain.PrepareGuides.statusLineFor(record.localState),
+                        style = TextStyle(
+                            fontFamily = ManropeFamily,
+                            fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
                             color = RescueColors.Muted
                         )
@@ -1490,6 +1555,8 @@ private fun AccountLanding(viewModel: AppViewModel, accountViewModel: AccountVie
     val session by accountViewModel.session.collectAsState()
     val pending by accountViewModel.pendingVerificationUsername.collectAsState()
     val syncStatus by accountViewModel.syncStatus.collectAsState()
+    val serverUrl by accountViewModel.serverUrl.collectAsState()
+    val isDefaultServer by accountViewModel.isUsingDefaultServer.collectAsState()
     val countdownEndsAt by viewModel.sosCountdownEndsAtMs.collectAsState()
     val me = session
 
@@ -1658,6 +1725,21 @@ private fun AccountLanding(viewModel: AppViewModel, accountViewModel: AccountVie
                             color = RescueColors.Muted
                         )
                     )
+                    // FIX5 (19 Nov): a fresh install already points at
+                    // the Render default, so login needs no setup — the
+                    // line below just says which server is in use.
+                    // (FIX4: the Server & sync row below this card is
+                    // reachable logged out, so a custom URL can still
+                    // be saved before login when testing.)
+                    Text(
+                        if (isDefaultServer) {
+                            "Server: $serverUrl (default)"
+                        } else {
+                            "Server: $serverUrl (custom)"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RescueColors.Muted
+                    )
                     PrimaryButton(
                         onClick = {
                             viewModel.pushSubScreen(SubScreen.Account(AccountPage.LOGIN))
@@ -1713,13 +1795,29 @@ private fun AccountLanding(viewModel: AppViewModel, accountViewModel: AccountVie
                     viewModel.pushSubScreen(SubScreen.Account(AccountPage.ROLE))
                 }
             }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AccountNavRow("Server & sync") {
-                        viewModel.pushSubScreen(SubScreen.Account(AccountPage.SERVER))
-                    }
-                    Text(syncStatus, style = MaterialTheme.typography.bodyMedium)
+        }
+        // FIX4 (18 Nov): "Server & sync" is NOT a signed-in feature.
+        // It used to live only in the signed-in branch above, so a
+        // logged-out user could never reach ServerPage — the only
+        // place a server URL can be saved — while login itself needs
+        // that URL. Dead loop, and the exact banner in the 18 Nov
+        // screenshot. The row is now unconditional: same destination
+        // (AccountPage.SERVER), same save flow, signed in or not.
+        // Role & applications stays signed-in-only, as before.
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                AccountNavRow("Server & sync") {
+                    viewModel.pushSubScreen(SubScreen.Account(AccountPage.SERVER))
                 }
+                Text(
+                    if (isDefaultServer) {
+                        "Default: $serverUrl — tap to test another server"
+                    } else {
+                        "Custom: $serverUrl"
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(syncStatus, style = MaterialTheme.typography.bodyMedium)
             }
         }
         item {
@@ -1902,7 +2000,10 @@ private fun AccountNavRow(title: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun LoginPage(accountViewModel: AccountViewModel, onOpenSignUp: () -> Unit) {
+private fun LoginPage(
+    accountViewModel: AccountViewModel,
+    onOpenSignUp: () -> Unit
+) {
     val busy by accountViewModel.busy.collectAsState()
     var loginUsername by remember { mutableStateOf("") }
     var loginPassword by remember { mutableStateOf("") }
@@ -1936,6 +2037,10 @@ private fun LoginPage(accountViewModel: AccountViewModel, onOpenSignUp: () -> Un
                     Text("Log in", maxLines = 1, softWrap = false)
                 }
                 TextButton(onClick = onOpenSignUp) { Text("No account yet? Sign up") }
+                // FIX5: the Render default is always in use unless a
+                // custom URL was saved, so this page never needs a
+                // "set server URL first" escape hatch any more (the
+                // FIX4 one was removed with it).
             }
         }
     }
@@ -2200,6 +2305,7 @@ private fun RolePage(accountViewModel: AccountViewModel) {
 @Composable
 private fun ServerPage(accountViewModel: AccountViewModel) {
     val serverUrl by accountViewModel.serverUrl.collectAsState()
+    val isDefault by accountViewModel.isUsingDefaultServer.collectAsState()
     val busy by accountViewModel.busy.collectAsState()
     val syncStatus by accountViewModel.syncStatus.collectAsState()
     var urlField by remember(serverUrl) { mutableStateOf(serverUrl) }
@@ -2211,7 +2317,20 @@ private fun ServerPage(accountViewModel: AccountViewModel) {
         item {
             RmCard {
                 // Server URL is always editable, signed in or not.
+                // FIX5: a fresh install already points at the Render
+                // default — this field is only for testing another
+                // server (e.g. a LAN URL). Saving overrides the
+                // default; "Use default server" goes back to it.
                 Text("Server", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (isDefault) {
+                        "Using the default server — nothing to type. " +
+                            "Change it below only to test another server."
+                    } else {
+                        "Using a custom server URL (default overridden)."
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 RmTextField(
                     value = urlField,
                     onValueChange = { urlField = it },
@@ -2225,6 +2344,15 @@ private fun ServerPage(accountViewModel: AccountViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Save server URL", maxLines = 1, softWrap = false)
+                }
+                if (!isDefault) {
+                    SecondaryButton(
+                        onClick = { accountViewModel.useDefaultServer() },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Use default server", maxLines = 1, softWrap = false)
+                    }
                 }
             }
         }

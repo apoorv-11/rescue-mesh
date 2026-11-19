@@ -49,6 +49,12 @@ enum class AccountPage(val title: String) {
 sealed interface SubScreen {
     data class Form(val kind: FormKind) : SubScreen
     data class Account(val page: AccountPage) : SubScreen
+    /**
+     * Prepare hub (Prompt 10): pushed over the HOME tab from its card.
+     * Deliberately NOT a 5th [AppTab] — the bottom bar keeps its 4 tabs.
+     */
+    data object PrepareList : SubScreen
+    data class PrepareDetail(val guideId: String) : SubScreen
 }
 
 /**

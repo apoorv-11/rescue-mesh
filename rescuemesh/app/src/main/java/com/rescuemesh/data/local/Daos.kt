@@ -82,6 +82,17 @@ interface MessageDao {
     @Query("UPDATE messages SET hopTrace = :hopTrace, hopCount = :hopCount WHERE messageId = :messageId")
     suspend fun updateHopTrace(messageId: String, hopTrace: String, hopCount: Int)
 
+    /**
+     * Photo-upload candidates (FIX5): records already SERVER_SYNCED,
+     * oldest first. The photo phase only ever uploads for these —
+     * record first, photo behind.
+     */
+    @Query(
+        "SELECT * FROM messages WHERE localState = 'SERVER_SYNCED' " +
+            "ORDER BY createdAt ASC LIMIT :limit"
+    )
+    suspend fun findSynced(limit: Int): List<MessageEntity>
+
     /** Message ids this phone holds, for the HELLO inventory (queue order, capped by the caller). */
     @Query("SELECT messageId FROM messages ORDER BY priority ASC, createdAt ASC LIMIT :limit")
     suspend fun findInventoryIds(limit: Int): List<String>
@@ -165,6 +176,36 @@ interface PhotoDeliveryDao {
 
     @Query("SELECT COUNT(*) FROM photo_delivery WHERE messageId = :messageId")
     suspend fun countForMessage(messageId: String): Int
+}
+
+@Dao
+interface PhotoUploadDao {
+    /** Insert-or-replace: one receipt per messageId; re-marking is a no-op in effect. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(upload: PhotoUploadEntity)
+
+    @Query("SELECT * FROM photo_upload WHERE messageId = :messageId")
+    suspend fun getById(messageId: String): PhotoUploadEntity?
+
+    @Query("SELECT COUNT(*) FROM photo_upload WHERE messageId = :messageId")
+    suspend fun countForMessage(messageId: String): Int
+}
+
+@Dao
+interface SavedGuideDao {
+    /** Insert-or-replace: saving an already-saved guide just refreshes its time. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(saved: SavedGuideEntity)
+
+    @Query("DELETE FROM saved_guides WHERE guideId = :guideId")
+    suspend fun deleteById(guideId: String)
+
+    /** Saved guide ids, newest first — the Prepare list reduces this to a set. */
+    @Query("SELECT * FROM saved_guides ORDER BY savedAt DESC")
+    fun observeAll(): Flow<List<SavedGuideEntity>>
+
+    @Query("SELECT COUNT(*) FROM saved_guides WHERE guideId = :guideId")
+    suspend fun countForGuide(guideId: String): Int
 }
 
 @Dao

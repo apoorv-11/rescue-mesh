@@ -435,6 +435,18 @@ private fun RecordCard(
                             maxLines = if (expanded) Int.MAX_VALUE else 2,
                             overflow = TextOverflow.Ellipsis
                         )
+                        // Prompt 10 Emergency screen (surfacing only):
+                        // the record's state in plain words. Same line
+                        // as the Home mini-cards.
+                        Text(
+                            com.rescuemesh.domain.PrepareGuides.statusLineFor(record.localState),
+                            style = TextStyle(
+                                fontFamily = ManropeFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                color = RescueColors.Muted
+                            )
+                        )
                     }
                     if (expanded) {
                         Icon(

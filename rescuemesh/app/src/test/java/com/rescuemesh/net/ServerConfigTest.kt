@@ -46,4 +46,29 @@ class ServerConfigTest {
     fun `rejects whitespace inside the host`() {
         assertNull(ServerConfig.normalizeBaseUrl("http://192. 168.1.5:8081"))
     }
+
+    // ------------------------------------------------------------ FIX5 default
+
+    @Test
+    fun `default is the Render URL given on 19 Nov 2026`() {
+        assertEquals(
+            "https://rescue-mesh-m0n0.onrender.com",
+            ServerConfig.DEFAULT_BASE_URL
+        )
+    }
+
+    @Test
+    fun `no saved URL falls back to the Render default, never null`() {
+        assertEquals(ServerConfig.DEFAULT_BASE_URL, ServerConfig.effectiveBaseUrl(null))
+        assertEquals(ServerConfig.DEFAULT_BASE_URL, ServerConfig.effectiveBaseUrl(""))
+        assertEquals(ServerConfig.DEFAULT_BASE_URL, ServerConfig.effectiveBaseUrl("   "))
+    }
+
+    @Test
+    fun `a saved custom URL wins over the default`() {
+        assertEquals(
+            "http://192.168.1.5:8081",
+            ServerConfig.effectiveBaseUrl("http://192.168.1.5:8081")
+        )
+    }
 }

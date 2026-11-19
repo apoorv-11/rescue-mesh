@@ -14,6 +14,8 @@
 #   (4.12.0), which is therefore NOT re-pinned here. kotlinx-serialization
 #   1.13.0: latest stable on Maven Central metadata; the serialization
 #   compiler plugin is versioned with Kotlin itself (2.4.21).
+# - WorkManager 2.12.0: latest stable on Maven Central metadata (FIX5,
+#   periodic gateway sync; 2.12.0 released Sep 2026, pre-releases excluded).
 [versions]
 agp = "9.5.1"
 kotlin = "2.4.21"
@@ -28,6 +30,7 @@ nearby = "19.5.1"
 tink = "1.24.0"
 retrofit = "3.0.0"
 kotlinxSerialization = "1.13.0"
+workmanager = "2.12.0"
 junit = "4.13.2"
 androidxTestExtJunit = "1.3.0"
 espresso = "3.7.0"
@@ -53,6 +56,7 @@ androidx-room-runtime = { group = "androidx.room", name = "room-runtime", versio
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workmanager" }
 play-services-nearby = { group = "com.google.android.gms", name = "play-services-nearby", version.ref = "nearby" }
 tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tink" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

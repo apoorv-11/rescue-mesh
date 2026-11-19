@@ -22,8 +22,10 @@ import com.rescuemesh.net.ApiClientSyncApi
 import com.rescuemesh.net.ApiResult
 import com.rescuemesh.net.GatewaySync
 import com.rescuemesh.net.InternetChecker
+import com.rescuemesh.net.PhotoSync
 import com.rescuemesh.net.ServerConfig
 import com.rescuemesh.net.SyncKeyStore
+import com.rescuemesh.net.SyncWork
 import com.rescuemesh.net.TokenStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -132,8 +134,17 @@ class RescueMeshApp : Application() {
             baseUrlProvider = { serverConfig.baseUrl() },
             healthProbe = { apiClient.health() is ApiResult.Success }
         )
+        val syncApi = ApiClientSyncApi(apiClient)
+        // FIX5 photo phase: runs inside GatewaySync AFTER the record
+        // batches (record first, photo behind — see PhotoSync).
+        val photoSync = PhotoSync(
+            api = syncApi,
+            messageDao = database.messageDao(),
+            uploadDao = database.photoUploadDao(),
+            photoBytes = { messageId -> photoStore.readComplete(messageId) }
+        )
         gatewaySync = GatewaySync(
-            api = ApiClientSyncApi(apiClient),
+            api = syncApi,
             baseUrlProvider = { serverConfig.baseUrl() },
             tokenProvider = { tokenStore.token() },
             messageDao = database.messageDao(),
@@ -144,9 +155,15 @@ class RescueMeshApp : Application() {
             ownDeviceId = deviceIdentity.originDeviceId,
             ownPublicKey = deviceIdentity.rawPublicKey,
             internetChecker = internetChecker,
-            networkTypeProvider = { currentNetworkType() }
+            networkTypeProvider = { currentNetworkType() },
+            photoSync = photoSync
         )
         registerGatewayNetworkCallback()
+        // FIX5 periodic sync (app closed): WorkManager re-runs the
+        // gateway sync every 15 minutes whenever any network is
+        // available — queued records sync without opening the app.
+        // Scheduling failure must never break startup.
+        runCatching { SyncWork.schedule(this) }
         // Trigger: app start (a no-op until a server URL is configured).
         triggerGatewaySync()
     }

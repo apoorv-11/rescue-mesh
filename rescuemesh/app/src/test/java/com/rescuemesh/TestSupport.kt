@@ -79,6 +79,13 @@ class InMemoryMessageDao : MessageDao {
         pending(setOf("CREATED", "QUEUED", "PEER_ACKED", "FAILED_RETRYABLE"), nowMs, limit)
     }
 
+    override suspend fun findSynced(limit: Int): List<MessageEntity> = mutex.withLock {
+        rows.values
+            .filter { it.localState == "SERVER_SYNCED" }
+            .sortedBy { it.createdAt }
+            .take(limit)
+    }
+
     override suspend fun updateHopTrace(messageId: String, hopTrace: String, hopCount: Int) {
         mutex.withLock {
             val existing = rows[messageId] ?: return@withLock
@@ -226,6 +233,47 @@ class InMemoryPhotoDeliveryDao : com.rescuemesh.data.local.PhotoDeliveryDao {
     override suspend fun countForMessage(messageId: String): Int = mutex.withLock {
         rows.values.count { it.messageId == messageId }
     }
+}
+
+/** In-memory [com.rescuemesh.data.local.PhotoUploadDao] (REPLACE upserts). */
+class InMemoryPhotoUploadDao : com.rescuemesh.data.local.PhotoUploadDao {
+    private val rows = LinkedHashMap<String, com.rescuemesh.data.local.PhotoUploadEntity>()
+    private val mutex = Mutex()
+
+    override suspend fun upsert(upload: com.rescuemesh.data.local.PhotoUploadEntity) {
+        mutex.withLock { rows[upload.messageId] = upload }
+    }
+
+    override suspend fun getById(messageId: String): com.rescuemesh.data.local.PhotoUploadEntity? =
+        mutex.withLock { rows[messageId] }
+
+    override suspend fun countForMessage(messageId: String): Int =
+        mutex.withLock { if (rows.containsKey(messageId)) 1 else 0 }
+}
+
+/** In-memory [com.rescuemesh.data.local.SavedGuideDao] for Prepare Saved tests. */
+class InMemorySavedGuideDao : com.rescuemesh.data.local.SavedGuideDao {
+    private val rows = LinkedHashMap<String, com.rescuemesh.data.local.SavedGuideEntity>()
+    private val mutex = Mutex()
+    private val allFlow =
+        MutableStateFlow<List<com.rescuemesh.data.local.SavedGuideEntity>>(emptyList())
+
+    private fun refresh() {
+        allFlow.value = rows.values.sortedByDescending { it.savedAt }
+    }
+
+    override suspend fun upsert(saved: com.rescuemesh.data.local.SavedGuideEntity) {
+        mutex.withLock { rows[saved.guideId] = saved; refresh() }
+    }
+
+    override suspend fun deleteById(guideId: String) {
+        mutex.withLock { rows.remove(guideId); refresh() }
+    }
+
+    override fun observeAll(): Flow<List<com.rescuemesh.data.local.SavedGuideEntity>> = allFlow
+
+    override suspend fun countForGuide(guideId: String): Int =
+        mutex.withLock { if (rows.containsKey(guideId)) 1 else 0 }
 }
 
 /** In-memory [com.rescuemesh.net.ServerKeyCache] for gateway-sync / ack-store tests. */

@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 3,
-    "identityHash": "f1d427578625e373c849cbb78e5cd923",
+    "version": 4,
+    "identityHash": "2987238477d9f72a462c26581b7bcf03",
     "entities": [
       {
         "tableName": "profile",
@@ -334,11 +334,59 @@
             "peerDeviceId"
           ]
         }
+      },
+      {
+        "tableName": "photo_upload",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `uploadedAt` INTEGER NOT NULL, PRIMARY KEY(`messageId`))",
+        "fields": [
+          {
+            "fieldPath": "messageId",
+            "columnName": "messageId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadedAt",
+            "columnName": "uploadedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "messageId"
+          ]
+        }
+      },
+      {
+        "tableName": "saved_guides",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`guideId` TEXT NOT NULL, `savedAt` INTEGER NOT NULL, PRIMARY KEY(`guideId`))",
+        "fields": [
+          {
+            "fieldPath": "guideId",
+            "columnName": "guideId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedAt",
+            "columnName": "savedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "guideId"
+          ]
+        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f1d427578625e373c849cbb78e5cd923')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2987238477d9f72a462c26581b7bcf03')"
     ]
   }
 }

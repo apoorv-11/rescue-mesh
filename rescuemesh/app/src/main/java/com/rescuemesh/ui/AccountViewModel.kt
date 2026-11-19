@@ -7,6 +7,7 @@ import com.rescuemesh.RescueMeshApp
 import com.rescuemesh.net.ApiResult
 import com.rescuemesh.net.MeResponse
 import com.rescuemesh.net.RoleApplicationView
+import com.rescuemesh.net.ServerConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,9 +30,17 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private val profileRepository = app.profileRepository
     private val originDeviceId = app.deviceIdentity.originDeviceId
 
-    private val _serverUrl = MutableStateFlow(serverConfig.baseUrl() ?: "")
-    /** The saved server base URL ("" when not configured yet). */
+    private val _serverUrl = MutableStateFlow(serverConfig.baseUrl())
+    /**
+     * The effective server base URL shown in the UI: the saved custom
+     * URL when one exists, otherwise the FIX5 Render default (never
+     * blank — see ServerConfig).
+     */
     val serverUrl: StateFlow<String> = _serverUrl.asStateFlow()
+
+    private val _isUsingDefaultServer = MutableStateFlow(serverConfig.isUsingDefault())
+    /** True when the Render default is in use (no custom URL saved). */
+    val isUsingDefaultServer: StateFlow<Boolean> = _isUsingDefaultServer.asStateFlow()
 
     private val _session = MutableStateFlow<MeResponse?>(null)
     /** The signed-in account as reported by GET /me, or null when signed out. */
@@ -82,12 +91,22 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val saved = serverConfig.saveBaseUrl(url)
         if (saved != null) {
             _serverUrl.value = saved
+            _isUsingDefaultServer.value = false
             _errorMessage.value = null
             _statusMessage.value = "Server URL saved: $saved"
         } else {
             _errorMessage.value =
                 "That URL doesn't look right — it must start with http:// or https:// and name a host."
         }
+    }
+
+    /** FIX5: forget a custom URL and go back to the Render default. */
+    fun useDefaultServer() {
+        serverConfig.clearCustomUrl()
+        _serverUrl.value = serverConfig.baseUrl()
+        _isUsingDefaultServer.value = true
+        _errorMessage.value = null
+        _statusMessage.value = "Using the default server: ${ServerConfig.DEFAULT_BASE_URL}"
     }
 
     fun signup(username: String, email: String, password: String) {

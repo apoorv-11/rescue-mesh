@@ -110,6 +110,31 @@ data class ServerAckEntity(
     val signature: String
 )
 
+/**
+ * A gateway photo upload receipt (FIX5): one row per record whose full
+ * photo was accepted by POST /sync/photo. Phone-local bookkeeping only
+ * — never serialised into an envelope. A missing row means "not uploaded
+ * yet" (or "no photo"); failures leave no row, so the next sync retries.
+ */
+@Entity(tableName = "photo_upload")
+data class PhotoUploadEntity(
+    @PrimaryKey val messageId: String,
+    /** Epoch ms the server accepted the photo. */
+    val uploadedAt: Long
+)
+
+/**
+ * A saved Prepare guide (Prompt 10): one row per guide id the user
+ * marked Saved. Phone-local only — guides are bundled content, never
+ * synced. Survives app restart (Room, not memory).
+ */
+@Entity(tableName = "saved_guides")
+data class SavedGuideEntity(
+    @PrimaryKey val guideId: String,
+    /** Epoch ms the guide was saved. */
+    val savedAt: Long
+)
+
 @Entity(tableName = "metrics")
 data class MetricsEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

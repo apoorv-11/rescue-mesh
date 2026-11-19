@@ -71,6 +71,10 @@ dependencies {
     implementation(libs.tink.android)
     implementation(libs.kotlinx.coroutines.android)
 
+    // FIX5 periodic gateway sync (app closed): WorkManager re-runs the
+    // sync every 15 minutes when any network is available.
+    implementation(libs.androidx.work.runtime.ktx)
+
     // Optional account layer only (com.rescuemesh.net): Retrofit brings its
     // own OkHttp (4.12.0 per the Retrofit 3.0.0 POM). Nothing in the mesh /
     // SOS path touches these.
