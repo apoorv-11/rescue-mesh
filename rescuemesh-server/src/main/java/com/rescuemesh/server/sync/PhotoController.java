@@ -8,6 +8,7 @@ import com.rescuemesh.server.repository.MessageRepository;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Iterator;
 import java.util.Optional;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -18,6 +19,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.multipart.MultipartHttpServletRequest;
 
 /**
  * Photo gateway endpoints (photo transfer design §3). A full photo (up to
@@ -26,6 +29,11 @@ import org.springframework.web.bind.annotation.RestController;
  * SHA-256 match the {@code photoRef} inside the already-synced, origin-
  * signed envelope payload. Both endpoints run under the default
  * authenticated rule (no new public endpoints).
+ *
+ * <p>The upload also accepts {@code multipart/form-data} (added 19 Nov):
+ * the Android gateway upload sends the photo as a multipart file part.
+ * Both forms run the identical size + SHA-256 verification against the
+ * signed {@code photoRef}; the raw-JPEG form is unchanged.
  */
 @RestController
 public class PhotoController {
@@ -52,6 +60,39 @@ public class PhotoController {
             produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> uploadPhoto(@RequestParam("messageId") String messageId,
                                               @RequestBody byte[] body) throws Exception {
+        return storeVerifiedPhoto(messageId, body);
+    }
+
+    /**
+     * Multipart form of the same upload: the photo arrives as the first
+     * file part (any part name) of a {@code multipart/form-data} request;
+     * {@code messageId} may be a query parameter or a form field. The
+     * bytes then go through the identical verification as the raw form.
+     */
+    @PostMapping(value = "/sync/photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> uploadPhotoMultipart(
+            @RequestParam(value = "messageId", required = false) String messageIdParam,
+            MultipartHttpServletRequest request) throws Exception {
+        String messageId = messageIdParam != null
+                ? messageIdParam : request.getParameter("messageId");
+        if (messageId == null || messageId.isBlank()) {
+            return error(HttpStatus.BAD_REQUEST, "messageId is required");
+        }
+        Iterator<String> partNames = request.getFileNames();
+        if (!partNames.hasNext()) {
+            return error(HttpStatus.BAD_REQUEST, "multipart request carries no file part");
+        }
+        MultipartFile file = request.getFile(partNames.next());
+        if (file == null || file.isEmpty()) {
+            return error(HttpStatus.BAD_REQUEST, "multipart file part is empty");
+        }
+        return storeVerifiedPhoto(messageId, file.getBytes());
+    }
+
+    /** Shared verify-and-store path for both upload forms. */
+    private ResponseEntity<String> storeVerifiedPhoto(String messageId, byte[] body)
+            throws Exception {
         if (!PhotoStorage.isSafeId(messageId)) {
             return error(HttpStatus.NOT_FOUND, "unknown messageId");
         }

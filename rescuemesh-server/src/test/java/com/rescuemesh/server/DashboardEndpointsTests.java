@@ -10,8 +10,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.rescuemesh.server.domain.MissingPerson;
+import com.rescuemesh.server.domain.SOSRecord;
 import com.rescuemesh.server.domain.SyncAudit;
 import com.rescuemesh.server.repository.MissingPersonRepository;
+import com.rescuemesh.server.repository.SOSRecordRepository;
 import com.rescuemesh.server.repository.SyncAuditRepository;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +49,9 @@ class DashboardEndpointsTests {
 
     @Autowired
     private MissingPersonRepository missingPersonRepository;
+
+    @Autowired
+    private SOSRecordRepository sosRecordRepository;
 
     @Autowired
     private SyncAuditRepository syncAuditRepository;
@@ -209,6 +214,60 @@ class DashboardEndpointsTests {
                 .andExpect(status().isBadRequest());
     }
 
+    // -- SOS resolve --------------------------------------------------------
+
+    @Test
+    void coordinatorCanResolveSosAndItPersists() throws Exception {
+        seedSos("sos-resolve-msg-001");
+        String token = coordinatorToken("soscoord", "soscoord@example.org");
+
+        mockMvc.perform(post("/records/sos/sos-resolve-msg-001/resolve")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.messageId").value("sos-resolve-msg-001"))
+                .andExpect(jsonPath("$.status").value("RESOLVED"));
+
+        // Persisted: the list view shows the resolved status too.
+        MvcResult list = mockMvc.perform(get("/records/sos")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<Map<String, Object>> matches = JsonPath.read(
+                list.getResponse().getContentAsString(),
+                "$[?(@.messageId == 'sos-resolve-msg-001')]");
+        assertFalse(matches.isEmpty(), "seeded SOS must be listed");
+        assertEquals("RESOLVED", matches.get(0).get("status"));
+
+        // Idempotent: resolving again returns the record, still RESOLVED.
+        mockMvc.perform(post("/records/sos/sos-resolve-msg-001/resolve")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RESOLVED"));
+    }
+
+    @Test
+    void resolveOfUnknownSosIs404() throws Exception {
+        String token = coordinatorToken("soscoord2", "soscoord2@example.org");
+        mockMvc.perform(post("/records/sos/no-such-sos-id/resolve")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void citizenCannotResolveSos() throws Exception {
+        seedSos("sos-resolve-msg-002");
+        String token = registerVerified("soscitizen", "soscitizen@example.org");
+        mockMvc.perform(post("/records/sos/sos-resolve-msg-002/resolve")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void unauthenticatedResolveIsRejected() throws Exception {
+        mockMvc.perform(post("/records/sos/sos-resolve-msg-001/resolve"))
+                .andExpect(status().isUnauthorized());
+    }
+
     // -- audit --------------------------------------------------------------
 
     @Test
@@ -246,6 +305,14 @@ class DashboardEndpointsTests {
     }
 
     // -- helpers ------------------------------------------------------------
+
+    private void seedSos(String messageId) {
+        SOSRecord record = new SOSRecord();
+        record.setMessageId(messageId);
+        record.setOriginDeviceId("device-seed-sos-001");
+        record.setStatus(SOSRecord.Status.OPEN);
+        sosRecordRepository.save(record);
+    }
 
     private void seedCase(String messageId, MissingPerson.Status status) {
         MissingPerson person = new MissingPerson();

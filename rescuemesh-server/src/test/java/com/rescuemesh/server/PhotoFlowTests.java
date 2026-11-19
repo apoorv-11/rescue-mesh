@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -42,6 +43,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -375,6 +377,59 @@ class PhotoFlowTests {
         assertEquals("FOUND_REPORTED", linked.get("status").textValue());
         assertEquals(foundId, linked.get("foundMessageId").textValue());
         assertEquals(T0 + 30000, linked.get("foundAt").longValue());
+    }
+
+    @Test
+    @Order(9)
+    void multipartPhotoUploadRunsTheSameVerification() throws Exception {
+        String token = registerVerifyAndLogin("photouser9", "photo9@example.org");
+        KeyPair origin = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        String missingId = UUID.randomUUID().toString();
+        byte[] photo = photoBytes(8192, 99);
+
+        ObjectNode payload = missingPayload("Multipart Case");
+        payload.set("photoRef", photoRef(missingId, photo));
+        JsonNode response = postBatch(token,
+                signedEnvelope(origin, missingId, "MISSING_PERSON", payload, T0, T0 + TTL_72H),
+                pubB64(origin), deviceId(origin));
+        assertEquals("ACCEPTED", response.get("results").get(0).get("status").textValue());
+
+        // The Android gateway form: multipart with the file under a part
+        // name the server does not dictate ("image", not "photo"), and the
+        // messageId as a form field rather than a query parameter.
+        MockMultipartFile part = new MockMultipartFile(
+                "image", "photo.jpg", MediaType.IMAGE_JPEG_VALUE, photo);
+        mockMvc.perform(multipart("/sync/photo")
+                        .file(part)
+                        .param("messageId", missingId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.messageId").value(missingId))
+                .andExpect(jsonPath("$.status").value("STORED"))
+                .andExpect(jsonPath("$.sizeBytes").value(8192));
+
+        MvcResult download = mockMvc.perform(get("/records/photos/" + missingId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertArrayEquals(photo, download.getResponse().getContentAsByteArray());
+
+        // The same verification applies: wrong bytes over multipart -> 400.
+        String otherId = UUID.randomUUID().toString();
+        ObjectNode payload2 = missingPayload("Multipart Impostor");
+        payload2.set("photoRef", photoRef(otherId, photo));
+        postBatch(token,
+                signedEnvelope(origin, otherId, "MISSING_PERSON", payload2, T0, T0 + TTL_72H),
+                pubB64(origin), deviceId(origin));
+        MockMultipartFile impostor = new MockMultipartFile(
+                "image", "photo.jpg", MediaType.IMAGE_JPEG_VALUE, photoBytes(8192, 100));
+        mockMvc.perform(multipart("/sync/photo")
+                        .file(impostor)
+                        .param("messageId", otherId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("sha256 mismatch"));
+        assertFalse(Files.exists(PHOTO_DIR.resolve(otherId + ".jpg")));
     }
 
     // -- helpers -----------------------------------------------------------

@@ -127,6 +127,8 @@ public class SecurityConfig {
                         .hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers(HttpMethod.POST, "/records/missing/*/review")
                         .hasAnyRole("COORDINATOR", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/records/sos/*/resolve")
+                        .hasAnyRole("COORDINATOR", "ADMIN")
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2

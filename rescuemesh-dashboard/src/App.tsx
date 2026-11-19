@@ -18,6 +18,7 @@ import {
   mlPriority,
   openStream,
   publishAnnouncement,
+  resolveSos,
   reviewMissing,
   saveToken,
   type AnnouncementDto,
@@ -38,7 +39,8 @@ import {
      Live: fetch-based SSE reader on GET /records/stream
      (records-changed / photo-changed), Polling-2s fallback.
    Newer server endpoints wired here: POST /records/announcements,
-   POST /records/missing/{id}/review, GET /records/audit. Against an
+   POST /records/missing/{id}/review, POST /records/sos/{id}/resolve,
+   GET /records/audit. Against an
    older server build those answer 404 and the dashboard falls back
    to the template behaviour (local-only announcements, session-only
    case review, messages-derived audit strip) — labelled honestly.
@@ -358,6 +360,10 @@ interface QueueRow {
   createdAt: number;
   statusLabel: string;
   statusClass: string;
+  originDeviceId: string;
+  /* SAFETY_CHECKIN rows are grouped per device: this counts every
+   * check-in the device sent; the row itself is the newest one. */
+  checkinCount: number;
 }
 
 interface Pin {
@@ -421,6 +427,10 @@ function Dashboard({
   const [reviewLocalOnly, setReviewLocalOnly] = useState<Record<string, boolean>>({});
   const [reviewBusy, setReviewBusy] = useState<Record<string, boolean>>({});
   const [reviewError, setReviewError] = useState<Record<string, string>>({});
+
+  // SOS resolve (server-persisted): busy + per-row error, keyed by messageId.
+  const [resolveBusy, setResolveBusy] = useState<Record<string, boolean>>({});
+  const [resolveError, setResolveError] = useState<Record<string, string>>({});
 
   // Server sync-audit rows; null = endpoint unavailable (older server) or
   // not loaded yet — the strip then derives from /records/messages.
@@ -733,7 +743,7 @@ function Dashboard({
   );
 
   const queueRows = useMemo<QueueRow[]>(() => {
-    return messages
+    const rows = messages
       .map((m) => {
         const sosRec = sosById.get(m.messageId);
         const loc = payloadLocation(m.payload);
@@ -770,9 +780,33 @@ function Dashboard({
           createdAt: m.createdAt,
           statusLabel,
           statusClass,
+          originDeviceId: m.originDeviceId,
+          checkinCount: 1,
         };
-      })
-      .sort((a, b) => a.pri - b.pri || a.createdAt - b.createdAt);
+      });
+    /* Group "I Am Safe" check-ins per device: one row per device (its
+     * newest check-in) with the total count, instead of one row per tap.
+     * Display only — the server keeps every check-in as its own record. */
+    const grouped: QueueRow[] = [];
+    const checkinByDevice = new Map<string, QueueRow>();
+    for (const row of rows) {
+      if (row.type !== "SAFETY_CHECKIN") {
+        grouped.push(row);
+        continue;
+      }
+      const prev = checkinByDevice.get(row.originDeviceId);
+      if (!prev) {
+        checkinByDevice.set(row.originDeviceId, row);
+        grouped.push(row);
+      } else {
+        const count = prev.checkinCount + 1;
+        if (row.createdAt > prev.createdAt) {
+          Object.assign(prev, row);
+        }
+        prev.checkinCount = count;
+      }
+    }
+    return grouped.sort((a, b) => a.pri - b.pri || a.createdAt - b.createdAt);
   }, [messages, sosById, caseByMsgId]);
 
   const filteredRows = useMemo(() => {
@@ -969,6 +1003,41 @@ function Dashboard({
       }
     } finally {
       setReviewBusy((prev) => ({ ...prev, [caseKey]: false }));
+    }
+  }
+
+  /* ---------- SOS resolve: POST to the server; errors stay on the row ---------- */
+  async function doResolve(r: QueueRow) {
+    if (resolveBusy[r.messageId]) return;
+    setResolveBusy((prev) => ({ ...prev, [r.messageId]: true }));
+    setResolveError((prev) => {
+      const next = { ...prev };
+      delete next[r.messageId];
+      return next;
+    });
+    try {
+      const updated = await resolveSos(token, r.messageId);
+      setSos((prev) =>
+        prev.map((s) => (s.messageId === r.messageId ? { ...s, ...updated } : s)),
+      );
+      pushFeed(`SOS resolved — msg ${shortId(r.messageId)} (saved to server)`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        onLogout();
+      } else if (e instanceof ApiError && e.status === 404) {
+        setResolveError((prev) => ({
+          ...prev,
+          [r.messageId]: "Resolve needs the updated server build",
+        }));
+      } else {
+        setResolveError((prev) => ({
+          ...prev,
+          [r.messageId]:
+            e instanceof Error ? e.message : "Could not resolve this SOS",
+        }));
+      }
+    } finally {
+      setResolveBusy((prev) => ({ ...prev, [r.messageId]: false }));
     }
   }
 
@@ -1181,12 +1250,42 @@ function Dashboard({
                         <span className="badge dup">Possible duplicate</span>
                       </>
                     )}
+                    {r.type === "SAFETY_CHECKIN" && r.checkinCount > 1 && (
+                      <>
+                        <br />
+                        <span className="ml-slot">
+                          {r.checkinCount} check-ins from this device — newest shown
+                        </span>
+                      </>
+                    )}
                   </td>
                   <td data-lbl="Area">{r.area}</td>
                   <td data-lbl="Hops">{r.hops}</td>
                   <td data-lbl="Age">{ageLabel(Date.now() - r.createdAt)}</td>
                   <td data-lbl="Status">
                     <span className={r.statusClass}>{r.statusLabel}</span>
+                    {canReview &&
+                      r.type === "SOS" &&
+                      (r.statusLabel === "Open" || r.statusLabel === "Acknowledged") && (
+                        <>
+                          <br />
+                          <button
+                            className="btn"
+                            type="button"
+                            style={{ marginTop: 6, padding: "3px 10px", fontSize: 12 }}
+                            disabled={!!resolveBusy[r.messageId]}
+                            onClick={() => void doResolve(r)}
+                          >
+                            {resolveBusy[r.messageId] ? "Resolving…" : "Resolve"}
+                          </button>
+                        </>
+                      )}
+                    {resolveError[r.messageId] && (
+                      <>
+                        <br />
+                        <span className="ml-slot">{resolveError[r.messageId]}</span>
+                      </>
+                    )}
                   </td>
                 </tr>
                 );

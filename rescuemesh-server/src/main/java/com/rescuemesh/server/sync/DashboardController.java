@@ -6,9 +6,11 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rescuemesh.server.domain.Announcement;
 import com.rescuemesh.server.domain.MissingPerson;
+import com.rescuemesh.server.domain.SOSRecord;
 import com.rescuemesh.server.domain.SyncAudit;
 import com.rescuemesh.server.repository.AnnouncementRepository;
 import com.rescuemesh.server.repository.MissingPersonRepository;
+import com.rescuemesh.server.repository.SOSRecordRepository;
 import com.rescuemesh.server.repository.SyncAuditRepository;
 import java.time.Instant;
 import java.util.Optional;
@@ -36,6 +38,10 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code POST /records/missing/{messageId}/review} — persists a
  *       coordinator/admin case review (V4: CONFIRMED / REJECTED). The
  *       review never changes the sync-derived case status.</li>
+ *   <li>{@code POST /records/sos/{messageId}/resolve} — marks a synced SOS
+ *       RESOLVED (COORDINATOR/ADMIN only). The status enum already carried
+ *       RESOLVED; the dashboard drops resolved records from its active
+ *       queue. Idempotent: resolving twice returns the record again.</li>
  *   <li>{@code GET /records/audit} — the latest {@link SyncAudit} rows for
  *       the dashboard's sync strip.</li>
  * </ul>
@@ -49,16 +55,19 @@ public class DashboardController {
 
     private final AnnouncementRepository announcementRepository;
     private final MissingPersonRepository missingPersonRepository;
+    private final SOSRecordRepository sosRecordRepository;
     private final SyncAuditRepository syncAuditRepository;
     private final RecordsController recordsController;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public DashboardController(AnnouncementRepository announcementRepository,
                                MissingPersonRepository missingPersonRepository,
+                               SOSRecordRepository sosRecordRepository,
                                SyncAuditRepository syncAuditRepository,
                                RecordsController recordsController) {
         this.announcementRepository = announcementRepository;
         this.missingPersonRepository = missingPersonRepository;
+        this.sosRecordRepository = sosRecordRepository;
         this.syncAuditRepository = syncAuditRepository;
         this.recordsController = recordsController;
     }
@@ -141,6 +150,50 @@ public class DashboardController {
         person.setReviewedAt(Instant.now());
         MissingPerson saved = missingPersonRepository.save(person);
         return ResponseEntity.ok(mapper.writeValueAsString(recordsController.caseItem(saved)));
+    }
+
+    @PostMapping(value = "/records/sos/{messageId}/resolve",
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> resolveSos(@PathVariable String messageId) throws Exception {
+        Optional<SOSRecord> found = sosRecordRepository.findByMessageId(messageId);
+        if (found.isEmpty()) {
+            return error(HttpStatus.NOT_FOUND, "unknown messageId");
+        }
+        SOSRecord record = found.get();
+        record.setStatus(SOSRecord.Status.RESOLVED);
+        SOSRecord saved = sosRecordRepository.save(record);
+        return ResponseEntity.ok(mapper.writeValueAsString(sosItem(saved)));
+    }
+
+    /** One SOS item, byte-identical in shape to the GET /records/sos items. */
+    private ObjectNode sosItem(SOSRecord r) {
+        ObjectNode o = mapper.createObjectNode();
+        o.put("id", r.getId());
+        o.put("messageId", r.getMessageId());
+        o.put("originDeviceId", r.getOriginDeviceId());
+        o.put("status", r.getStatus().name());
+        if (r.getLatitude() != null) {
+            o.put("latitude", r.getLatitude());
+        } else {
+            o.putNull("latitude");
+        }
+        if (r.getLongitude() != null) {
+            o.put("longitude", r.getLongitude());
+        } else {
+            o.putNull("longitude");
+        }
+        o.put("note", r.getNote());
+        if (r.getCreatedAt() != null) {
+            o.put("createdAt", r.getCreatedAt().toEpochMilli());
+        } else {
+            o.putNull("createdAt");
+        }
+        if (r.getUpdatedAt() != null) {
+            o.put("updatedAt", r.getUpdatedAt().toEpochMilli());
+        } else {
+            o.putNull("updatedAt");
+        }
+        return o;
     }
 
     @GetMapping(value = "/records/audit", produces = MediaType.APPLICATION_JSON_VALUE)

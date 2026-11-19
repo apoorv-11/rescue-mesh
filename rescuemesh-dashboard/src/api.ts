@@ -234,6 +234,18 @@ export function fetchAudit(token: string): Promise<AuditDto[]> {
   return apiGet<AuditDto[]>("/records/audit", token);
 }
 
+/** Mark a synced SOS resolved. 200 → the updated SOS record item. */
+export function resolveSos(
+  token: string,
+  messageId: string,
+): Promise<SosRecordDto> {
+  return apiPost<SosRecordDto>(
+    `/records/sos/${encodeURIComponent(messageId)}/resolve`,
+    token,
+    {},
+  );
+}
+
 /** Case photo (JPEG) — needs the Authorization header, so fetch a blob. */
 export async function fetchPhotoBlob(
   messageId: string,
