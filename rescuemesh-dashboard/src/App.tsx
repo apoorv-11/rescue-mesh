@@ -364,6 +364,10 @@ interface QueueRow {
   /* SAFETY_CHECKIN rows are grouped per device: this counts every
    * check-in the device sent; the row itself is the newest one. */
   checkinCount: number;
+  /* False when the record carries no real text for the ML service —
+   * those rows show no ML slot at all (not a misleading
+   * "not connected yet"). */
+  mlEligible: boolean;
 }
 
 interface Pin {
@@ -782,6 +786,7 @@ function Dashboard({
           statusClass,
           originDeviceId: m.originDeviceId,
           checkinCount: 1,
+          mlEligible: mlText(m) !== null,
         };
       });
     /* Group "I Am Safe" check-ins per device: one row per device (its
@@ -1233,9 +1238,9 @@ function Dashboard({
                       <span className="ml-chip">
                         ML P{ml.priority} · {scorePct(mlTop ?? 0)}%
                       </span>
-                    ) : (
+                    ) : r.mlEligible ? (
                       <span className="ml-slot">ML score: not connected yet</span>
-                    )}
+                    ) : null}
                   </td>
                   <td data-lbl="Type">
                     <b>{typeLabel(r.type)}</b>
@@ -1550,6 +1555,18 @@ function PhotoSlot({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  /* Full-photo view: the card shows a cropped 170px thumb; clicking it
+   * opens the same loaded image full-size in an overlay. */
+  const [viewing, setViewing] = useState(false);
+
+  useEffect(() => {
+    if (!viewing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViewing(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewing]);
 
   useEffect(() => {
     onBlob?.(null);
@@ -1584,7 +1601,14 @@ function PhotoSlot({
   return (
     <figure>
       {state === "ok" && url ? (
-        <img src={url} alt={`${caption} photo`} loading="lazy" />
+        <img
+          src={url}
+          alt={`${caption} photo`}
+          loading="lazy"
+          className="clickable"
+          title="Click to view the full photo"
+          onClick={() => setViewing(true)}
+        />
       ) : (
         <div className="nophoto">
           {state === "loading"
@@ -1595,6 +1619,17 @@ function PhotoSlot({
         </div>
       )}
       <figcaption>{caption}</figcaption>
+      {viewing && url && (
+        <div
+          className="lightbox"
+          role="dialog"
+          aria-label={`${caption} — full photo`}
+          onClick={() => setViewing(false)}
+        >
+          <img src={url} alt={`${caption} photo (full size)`} />
+          <span className="lightbox-cap">{caption} — click anywhere or press Esc to close</span>
+        </div>
+      )}
     </figure>
   );
 }

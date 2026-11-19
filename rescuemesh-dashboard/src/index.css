@@ -166,6 +166,17 @@ h1, h2, h3 { font-family: "Archivo", "Manrope", sans-serif; margin: 0; letter-sp
 .case-photos { display: grid; grid-template-columns: 1fr 1fr; }
 .case-photos figure { margin: 0; position: relative; background: var(--surface-2); }
 .case-photos img { width: 100%; height: 170px; object-fit: cover; display: block; }
+.case-photos img.clickable { cursor: zoom-in; }
+.lightbox {
+  position: fixed; inset: 0; z-index: 80; padding: 24px;
+  background: rgba(4, 10, 18, .9); cursor: zoom-out;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+}
+.lightbox img {
+  width: auto; height: auto; max-width: 92vw; max-height: 86vh;
+  object-fit: contain; border-radius: 10px; display: block;
+}
+.lightbox-cap { color: #dbe7f5; font-size: 13px; font-weight: 600; }
 .case-photos figcaption {
   position: absolute; left: 8px; bottom: 8px;
   background: rgba(10, 20, 30, .78); color: #fff;
